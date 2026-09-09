@@ -1,0 +1,9 @@
+﻿Timestamp: 2026-07-21 14:45:12
+Project: C:\Docker-Projects\Freight-Calc-Nuevo
+Update package: C:\Users\fabian\Downloads\CubicMargin_0-20_LIVE_VALIDATION.zip
+Backup folder: C:\Docker-Projects\Freight-Calc-Nuevo\file_backups\before_cubicmargin_20260721_144512
+
+Files backed up and replaced:
+app\templates\freight\calculator.html
+app\apps\freight\services\calculator.py
+app\apps\freight\tests\test_cubic_margin.py

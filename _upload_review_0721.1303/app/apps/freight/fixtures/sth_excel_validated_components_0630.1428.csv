@@ -1,0 +1,21 @@
+case_id,test_type,suburb,state,postcode,tailgate,sku_1,qty_1,sku_2,qty_2,total_weight_kg,total_cubic_m3,expected_cheapest_carrier,expected_cheapest_service,expected_cheapest_estimate_ex_gst,fuel_levy_date,source_page,notes
+CASE_001,Volumetric interstate / zone-rate lookup,CAROLINE SPRINGS,VIC,3023,NO,SMC30CABLED,1,,,2196.5,14.43,KTI,GENERAL,647.17,22/06/2026,User latest screenshots 0630,Corrected from latest Excel/app screenshots: postcode 3023; cheapest KTI GENERAL 647.17.
+CASE_002,Base consolidation / SA ranking,BLAIR ATHOL,SA,5084,NO,20772,4,20985,2,1035.0,0.912,TEAMEX,ROAD,145.28,08/06/2026,PDF p.1 bottom / p.2,Duplicate screenshot on p.2 confirms same result.
+CASE_003,Heavy SKU accepted / SM460-A,BLAIR ATHOL,SA,5084,NO,SM460-A,4,,,8930.0,4.351,STEA,ROAD,133.28,22/06/2026,PDF p.3,This is SM460-A; do not merge with SM460 cases.
+CASE_004,Volumetric + Tailgate / multiple lines,BLAIR ATHOL,SA,5084,YES,SMC30CABLED,1,SMC30CABLED,4,10982.5,28.86,STEA,ROAD,316.84,22/06/2026,PDF p.4,Two lines: qty 1 and qty 4.
+CASE_005,Tailgate comparison / base two SKUs,BLAIR ATHOL,SA,5084,YES,20772,4,20985,2,1035.0,0.912,STEA,ROAD,376.4,22/06/2026,PDF p.5,Same input as CASE_002 but Tailgate YES and newer fuel date.
+CASE_006,Heavy SKU + Tailgate / SM460,BLAIR ATHOL,SA,5084,YES,SM460,4,,,8930.0,4.782,STEA,ROAD,257.28,22/06/2026,PDF p.6,"Observed SKU is SM460, not SM460-A."
+CASE_007,Volumetric interstate + Tailgate,CAROLINE SPRINGS,VIC,3020,YES,SMC30CABLED,1,,,2196.5,14.43,KTI,GENERAL,684.17,22/06/2026,PDF p.7,Only 3 ranking rows visible.
+CASE_008,Minimum/simple single SKU,BLAIR ATHOL,SA,5084,NO,20772,1,,,102.5,0.336,STEA,ROAD,47.6,22/06/2026,PDF p.8,Useful simple baseline with 5 visible rankings.
+CASE_009,Minimum/simple second SKU,BLAIR ATHOL,SA,5084,NO,20985,1,,,312.5,0.576,STEA,ROAD,47.6,22/06/2026,PDF p.9,4 visible rankings.
+CASE_010,Small two-SKU consolidation,BLAIR ATHOL,SA,5084,NO,20772,1,20985,1,415.0,0.912,STEA,ROAD,76.16,22/06/2026,PDF p.10,Base consolidation small quantities.
+CASE_011,Small two-SKU consolidation + Tailgate,BLAIR ATHOL,SA,5084,YES,20772,1,20985,1,415.0,0.912,STEA,ROAD,138.16,22/06/2026,PDF p.11,Same products as CASE_010 with Tailgate YES.
+CASE_012,Heavy escalation / SM460 qty 1,BLAIR ATHOL,SA,5084,NO,SM460,1,,,2232.5,4.782,STEA,ROAD,47.6,22/06/2026,PDF p.12,Observed SKU is SM460.
+CASE_013,Heavy escalation / SM460 qty 2,BLAIR ATHOL,SA,5084,NO,SM460,2,,,4465.0,4.782,STEA,ROAD,76.16,22/06/2026,PDF p.13,Compare with CASE_012 and CASE_014.
+CASE_014,Heavy escalation / SM460 qty 4,BLAIR ATHOL,SA,5084,NO,SM460,4,,,8930.0,4.782,STEA,ROAD,133.28,22/06/2026,PDF p.14,Compare with CASE_006 Tailgate YES.
+CASE_015,Volumetric SA qty 1,BLAIR ATHOL,SA,5084,NO,SMC30CABLED,1,,,2196.5,14.43,STEA,ROAD,47.6,22/06/2026,PDF p.15,Compare with CASE_001 same SKU but VIC.
+CASE_016,Volumetric SA escalation qty 2,BLAIR ATHOL,SA,5084,NO,SMC30CABLED,2,,,4393.0,14.43,STEA,ROAD,76.16,22/06/2026,PDF p.16,Note Excel screenshot keeps total cubic at 14.430.
+CASE_017,Volumetric SA escalation qty 3,BLAIR ATHOL,SA,5084,NO,SMC30CABLED,3,,,6589.5,14.43,STEA,ROAD,104.72,22/06/2026,PDF p.17,Note Excel screenshot keeps total cubic at 14.430.
+CASE_018,Volumetric SA escalation qty 4,BLAIR ATHOL,SA,5084,NO,SMC30CABLED,4,,,8786.0,14.43,STEA,ROAD,133.28,22/06/2026,PDF p.18,Compare with CASE_004 multi-line Tailgate YES.
+CASE_019,Interstate base two SKUs,CAROLINE SPRINGS,VIC,3020,NO,20772,4,20985,2,1035.0,0.912,KTI,GENERAL,154.23,22/06/2026,PDF p.19,Only 3 ranking rows visible.
+CASE_020,Interstate base two SKUs + Tailgate,CAROLINE SPRINGS,VIC,3020,YES,20772,4,20985,2,1035.0,0.912,KTI,GENERAL,376.23,22/06/2026,PDF p.20,Only 3 ranking rows visible.

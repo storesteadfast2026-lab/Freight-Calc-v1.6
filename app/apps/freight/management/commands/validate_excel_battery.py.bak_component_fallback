@@ -1,0 +1,523 @@
+from __future__ import annotations
+
+import csv
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
+from typing import Iterable
+
+from django.conf import settings
+from django.core.management import call_command
+from django.core.management.base import BaseCommand, CommandError
+
+from apps.freight.services.calculator import FreightCalculatorService
+from apps.freight.services.consolidator import PALLET_CUBIC_M3
+from apps.freight.services.dtos import FreightLine, FreightRequest
+from apps.freight.services.validators import ValidationError
+from apps.products.models import Product
+
+
+DEFAULT_CASES      = "/app/apps/freight/fixtures/sth_excel_validated_cases_0629.1513.csv"
+DEFAULT_EXPECTED   = "/app/apps/freight/fixtures/sth_excel_validated_outputs_0629.1513.csv"
+DEFAULT_COMPONENTS = "/app/apps/freight/fixtures/sth_excel_validated_components_0629.1513.csv"
+DEFAULT_WORKBOOK   = "/app/sample_data/V2026.R2_Unlocked_STH_Freight_Calculator.xlsx"
+DEFAULT_CLIENT = "STH"
+DEFAULT_TOLERANCE = Decimal("0.01")
+VALIDATED_STATUS_PREFIX = "validated"
+EXCEL_LIVE_STATUS = "generated_from_excel_live"
+
+
+@dataclass(frozen=True)
+class ExpectedOutput:
+    case_id: str
+    rank: int
+    carrier: str
+    service: str
+    estimate_ex_gst: Decimal
+    validation_status: str = ""
+    source_page: str = ""
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class ActualOutput:
+    case_id: str
+    rank: int
+    carrier: str
+    service: str
+    estimate_ex_gst: Decimal
+    total_weight_kg: Decimal | None = None
+    total_cubic_m3: Decimal | None = None
+    rating_cubic_m3: Decimal | None = None
+    pallet_cubic_adjustment_m3: Decimal | None = None
+    chargeable_weight: Decimal | None = None
+
+
+def _text(value) -> str:
+    return str(value or "").strip()
+
+
+def _upper(value) -> str:
+    return _text(value).upper()
+
+
+def _decimal(value, default: str = "0") -> Decimal:
+    text = _text(value).replace("$", "").replace(",", "")
+    if not text:
+        text = default
+    try:
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        return Decimal(default)
+
+
+def _money(value) -> Decimal:
+    return _decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _rank(value) -> int:
+    try:
+        return int(_decimal(value))
+    except Exception:
+        return 0
+
+
+def _normalize_sku(value) -> str:
+    """Keep alphanumeric SKUs untouched, but normalize 20772.0 -> 20772."""
+    sku = _text(value)
+    if sku.endswith(".0") and sku[:-2].isdigit():
+        return sku[:-2]
+    return sku
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        raise CommandError(f"CSV file not found: {path}")
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
+
+
+def _write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _is_validated(row: dict[str, str]) -> bool:
+    """Accept expected rows generated from trusted Excel evidence."""
+    status = _text(row.get("validation_status")).lower()
+    return status.startswith(VALIDATED_STATUS_PREFIX) or status == EXCEL_LIVE_STATUS
+
+
+def _money_diff(actual: Decimal | None, expected: Decimal | None) -> Decimal | None:
+    if actual is None or expected is None:
+        return None
+    return (actual - expected).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _component_decimal(actual: Decimal | None, expected_text: str, tolerance: Decimal) -> tuple[str, str, str]:
+    """Return expected, actual, status for component comparisons."""
+    if not _text(expected_text):
+        return "", "", "SKIPPED"
+    expected = _decimal(expected_text)
+    if actual is None:
+        return str(expected), "", "FAIL"
+    diff = abs(actual - expected)
+    status = "OK" if diff <= tolerance else "FAIL"
+    return str(expected), str(actual), status
+
+
+def _display_cubic_from_rating_cubic(rating_cubic: Decimal | None, pallet_count: Decimal | None) -> tuple[Decimal | None, Decimal | None]:
+    """Return Calculator-visible cubic and the pallet cubic adjustment removed.
+
+    Django's result details['cubic_total'] comes from the consolidated freight
+    value used for rating and includes pallet cubic. The visual Excel battery
+    compares against Calculator!J24, which is the visible product cubic total.
+    Therefore the battery removes the same pallet cubic adjustment from the
+    Django rating cubic before comparing component totals.
+    """
+    if rating_cubic is None:
+        return None, None
+    pallets = pallet_count or Decimal("0")
+    adjustment = pallets * PALLET_CUBIC_M3 if pallets > Decimal("0.99") else Decimal("0")
+    return rating_cubic - adjustment, adjustment
+
+
+class Command(BaseCommand):
+    help = (
+        "Validate the Django freight engine against Excel-validated screenshot "
+        "fixtures or on-demand Excel automation. This command does not use invented expected values; it "
+        "compares Django results against the CSV battery extracted from Excel Calculator."
+    )
+
+    def add_arguments(self, parser):
+        parser.add_argument("--cases", default=DEFAULT_CASES, help="CSV containing Excel-validated input cases.")
+        parser.add_argument("--expected", default=DEFAULT_EXPECTED, help="CSV containing Excel expected ranked outputs.")
+        parser.add_argument("--components", default=DEFAULT_COMPONENTS, help="Optional CSV containing expected total weight/cubic per case.")
+        parser.add_argument("--client", default=DEFAULT_CLIENT, help="Client code. Default: STH.")
+        parser.add_argument("--case-id", action="append", default=[], help="Run only one case_id. Can be repeated.")
+        parser.add_argument(
+            "--only-validated",
+            action="store_true",
+            default=True,
+            help=(
+                "Run only trusted Excel-derived rows. Accepts validation_status values "
+                "starting with 'validated' and also 'generated_from_excel_live'. Default: enabled."
+            ),
+        )
+        parser.add_argument("--include-pending", action="store_false", dest="only_validated", help="Also run pending/draft cases.")
+        parser.add_argument("--tolerance", default=str(DEFAULT_TOLERANCE), help="Allowed money difference. Default: 0.01")
+        parser.add_argument("--component-tolerance", default="0.001", help="Allowed weight/cubic difference. Default: 0.001")
+        parser.add_argument("--report", default="", help="Output report CSV path. Default: /app/reports/sth_excel_battery_report_MMDD.HHMM.csv")
+        parser.add_argument("--fail-on-difference", action="store_true", help="Return error code if any FAIL row exists.")
+        parser.add_argument("--import-workbook", action="store_true", help="Import the STH workbook before validation.")
+        parser.add_argument("--workbook", default=DEFAULT_WORKBOOK, help="Workbook path used only with --import-workbook.")
+        parser.add_argument("--replace", action="store_true", default=True, help="Use --replace when importing workbook. Default: enabled.")
+        parser.add_argument("--no-replace", action="store_false", dest="replace", help="Import workbook without replacing existing data.")
+
+    def handle(self, *args, **options):
+        cases_path = Path(options["cases"])
+        expected_path = Path(options["expected"])
+        components_path = Path(options["components"])
+        client_code = _upper(options["client"]) or DEFAULT_CLIENT
+        tolerance = _money(options["tolerance"])
+        component_tolerance = _decimal(options["component_tolerance"], "0.001")
+        selected_case_ids = {_upper(case_id) for case_id in options["case_id"]}
+
+        if options["import_workbook"]:
+            self._import_workbook(Path(options["workbook"]), client_code, replace=options["replace"])
+        else:
+            self.stdout.write(self.style.WARNING("Workbook import skipped. Using current PostgreSQL data."))
+
+        case_rows = self._load_cases(cases_path, selected_case_ids, options["only_validated"])
+        expected_rows = self._load_expected(expected_path, selected_case_ids, options["only_validated"])
+        component_rows = self._load_components(components_path, selected_case_ids) if components_path.exists() else {}
+
+        actual_by_case, case_errors = self._calculate_actuals(case_rows, client_code)
+        output_report = self._compare_outputs(case_rows, expected_rows, actual_by_case, case_errors, tolerance)
+        component_report = self._compare_components(case_rows, component_rows, actual_by_case, case_errors, component_tolerance)
+
+        report_rows = output_report + component_report
+        report_path = Path(options["report"]) if options["report"] else self._default_report_path()
+        fieldnames = [
+            "row_type", "check_type", "case_id", "test_type", "purpose", "suburb", "state", "postcode", "tailgate",
+            "rank", "expected_carrier", "actual_carrier", "carrier_status",
+            "expected_service", "actual_service", "service_status",
+            "expected_estimate_ex_gst", "actual_estimate_ex_gst", "difference", "estimate_status",
+            "expected_total_weight_kg", "actual_total_weight_kg", "weight_status",
+            "expected_total_cubic_m3", "actual_total_cubic_m3", "cubic_status",
+            "actual_rating_cubic_m3", "pallet_cubic_adjustment_m3",
+            "overall_status", "validation_status", "source_page", "notes",
+        ]
+        _write_csv(report_path, report_rows, fieldnames)
+
+        summary = self._summarize(report_rows)
+        self.stdout.write("")
+        self.stdout.write(f"Excel battery report: {report_path}")
+        self.stdout.write(f"Cases run: {len(case_rows)}")
+        self.stdout.write(f"Expected output rows loaded: {len(expected_rows)}")
+        self.stdout.write(f"Report rows: {summary['rows']}")
+        self.stdout.write(self.style.SUCCESS(f"OK rows: {summary['ok']}"))
+        if summary["fail"]:
+            self.stdout.write(self.style.ERROR(f"FAIL rows: {summary['fail']}"))
+        else:
+            self.stdout.write(self.style.SUCCESS("FAIL rows: 0"))
+        if summary["skipped"]:
+            self.stdout.write(self.style.WARNING(f"SKIPPED rows: {summary['skipped']}"))
+
+        if summary["fail"] and options["fail_on_difference"]:
+            raise CommandError(f"Excel battery validation failed with {summary['fail']} FAIL row(s). See: {report_path}")
+
+    def _import_workbook(self, workbook_path: Path, client_code: str, replace: bool) -> None:
+        if not workbook_path.exists():
+            raise CommandError(f"Workbook not found: {workbook_path}")
+        args = [str(workbook_path), "--client", client_code]
+        if replace:
+            args.append("--replace")
+        self.stdout.write(f"Importing workbook: {workbook_path}")
+        call_command("import_sth_excel", *args)
+
+    def _default_report_path(self) -> Path:
+        stamp = datetime.now().strftime("%m%d.%H%M")
+        project_root = Path(settings.BASE_DIR).parent
+        return project_root / "reports" / f"sth_excel_battery_report_{stamp}.csv"
+
+    def _load_cases(self, path: Path, selected_case_ids: set[str], only_validated: bool) -> list[dict[str, str]]:
+        rows = _read_csv(path)
+        filtered: list[dict[str, str]] = []
+        for row in rows:
+            case_id = _upper(row.get("case_id"))
+            if not case_id:
+                continue
+            if selected_case_ids and case_id not in selected_case_ids:
+                continue
+            if only_validated and not _is_validated(row):
+                continue
+            row["case_id"] = case_id
+            filtered.append(row)
+        if not filtered:
+            raise CommandError(f"No case rows selected from: {path}")
+        return filtered
+
+    def _load_expected(self, path: Path, selected_case_ids: set[str], only_validated: bool) -> list[ExpectedOutput]:
+        rows = _read_csv(path)
+        expected: list[ExpectedOutput] = []
+        for row in rows:
+            case_id = _upper(row.get("case_id"))
+            if not case_id:
+                continue
+            if selected_case_ids and case_id not in selected_case_ids:
+                continue
+            if only_validated and not _is_validated(row):
+                continue
+            rank = _rank(row.get("rank"))
+            carrier = _upper(row.get("expected_carrier"))
+            service = _upper(row.get("expected_service"))
+            estimate_text = _text(row.get("expected_estimate_ex_gst"))
+            if rank <= 0 or not carrier or not service or not estimate_text:
+                continue
+            expected.append(ExpectedOutput(
+                case_id=case_id,
+                rank=rank,
+                carrier=carrier,
+                service=service,
+                estimate_ex_gst=_money(estimate_text),
+                validation_status=_text(row.get("validation_status")),
+                source_page=_text(row.get("source_page") or row.get("source")),
+                notes=_text(row.get("notes")),
+            ))
+        if not expected:
+            raise CommandError(f"No expected output rows selected from: {path}")
+        return expected
+
+    def _load_components(self, path: Path, selected_case_ids: set[str]) -> dict[str, dict[str, str]]:
+        rows = _read_csv(path)
+        components: dict[str, dict[str, str]] = {}
+        for row in rows:
+            case_id = _upper(row.get("case_id"))
+            if not case_id:
+                continue
+            if selected_case_ids and case_id not in selected_case_ids:
+                continue
+            components[case_id] = row
+        return components
+
+    def _calculate_actuals(
+        self,
+        case_rows: Iterable[dict[str, str]],
+        client_code: str,
+    ) -> tuple[dict[str, list[ActualOutput]], dict[str, str]]:
+        service = FreightCalculatorService()
+        actual_by_case: dict[str, list[ActualOutput]] = {}
+        errors: dict[str, str] = {}
+
+        for case in case_rows:
+            case_id = _upper(case.get("case_id"))
+            try:
+                request = self._build_request(case, client_code)
+                results = service.calculate(request)
+                actual_outputs: list[ActualOutput] = []
+                for index, result in enumerate(results, start=1):
+                    details = getattr(result, "details", {}) or {}
+                    rating_cubic = _decimal(details.get("cubic_total")) if details.get("cubic_total") is not None else None
+                    pallet_count = _decimal(details.get("pallets")) if details.get("pallets") is not None else Decimal("0")
+                    display_cubic, pallet_cubic_adjustment = _display_cubic_from_rating_cubic(rating_cubic, pallet_count)
+                    actual_outputs.append(ActualOutput(
+                        case_id=case_id,
+                        rank=index,
+                        carrier=_upper(result.carrier),
+                        service=_upper(result.service),
+                        estimate_ex_gst=_money(result.estimate_ex_gst),
+                        total_weight_kg=_decimal(details.get("actual_weight")) if details.get("actual_weight") is not None else None,
+                        total_cubic_m3=display_cubic,
+                        rating_cubic_m3=rating_cubic,
+                        pallet_cubic_adjustment_m3=pallet_cubic_adjustment,
+                        chargeable_weight=_decimal(details.get("chargeable_weight")) if details.get("chargeable_weight") is not None else None,
+                    ))
+                actual_by_case[case_id] = actual_outputs
+            except (ValidationError, Product.DoesNotExist, ValueError) as exc:
+                errors[case_id] = str(exc)
+                actual_by_case[case_id] = []
+            except Exception as exc:
+                errors[case_id] = f"Unexpected Django calculation error: {exc}"
+                actual_by_case[case_id] = []
+
+        return actual_by_case, errors
+
+    def _build_request(self, case: dict[str, str], client_code: str) -> FreightRequest:
+        lines: list[FreightLine] = []
+        for idx in range(1, 13):
+            sku = _normalize_sku(case.get(f"sku_{idx}"))
+            qty = _decimal(case.get(f"qty_{idx}"))
+            if not sku or qty <= Decimal("0"):
+                continue
+            product = Product.objects.get(client__code=client_code, sku=sku, active=True)
+            lines.append(FreightLine(
+                sku=product.sku,
+                quantity=qty,
+                freight_type=product.freight_type or "P",
+                length_m=product.length_m,
+                width_m=product.width_m,
+                height_m=product.height_m,
+                weight_kg=product.weight_kg,
+                cubic_m3=product.cubic_m3,
+            ))
+        if not lines:
+            raise ValueError("No valid SKU/quantity lines found in input case.")
+
+        return FreightRequest(
+            client_code=client_code,
+            from_address_id=None,
+            suburb=_upper(case.get("suburb")),
+            state=_upper(case.get("state")),
+            postcode=_text(case.get("postcode")) or None,
+            tailgate=_upper(case.get("tailgate")) == "YES",
+            preselect_sku=_upper(case.get("preselect_sku_mode") or case.get("preselected_sku_mode") or "YES") == "YES",
+            lines=lines,
+        )
+
+    def _case_by_id(self, case_rows: Iterable[dict[str, str]]) -> dict[str, dict[str, str]]:
+        return {_upper(row.get("case_id")): row for row in case_rows}
+
+    def _compare_outputs(
+        self,
+        case_rows: list[dict[str, str]],
+        expected_rows: list[ExpectedOutput],
+        actual_by_case: dict[str, list[ActualOutput]],
+        case_errors: dict[str, str],
+        tolerance: Decimal,
+    ) -> list[dict[str, object]]:
+        cases = self._case_by_id(case_rows)
+        report_rows: list[dict[str, object]] = []
+
+        for exp in sorted(expected_rows, key=lambda item: (item.case_id, item.rank)):
+            case = cases.get(exp.case_id, {})
+            actual_list = actual_by_case.get(exp.case_id, [])
+            act = actual_list[exp.rank - 1] if len(actual_list) >= exp.rank else None
+            diff = _money_diff(act.estimate_ex_gst if act else None, exp.estimate_ex_gst)
+
+            carrier_status = "OK" if act and act.carrier == exp.carrier else "FAIL"
+            service_status = "OK" if act and act.service == exp.service else "FAIL"
+            estimate_status = "OK" if diff is not None and abs(diff) <= tolerance else "FAIL"
+            overall_status = "OK" if carrier_status == service_status == estimate_status == "OK" else "FAIL"
+
+            notes = exp.notes
+            if case_errors.get(exp.case_id):
+                notes = f"{notes} | {case_errors[exp.case_id]}".strip(" |")
+            elif act is None:
+                notes = f"{notes} | Django did not return rank {exp.rank}.".strip(" |")
+
+            report_rows.append({
+                "row_type": "rank_output",
+                "check_type": "rank_output",
+                "case_id": exp.case_id,
+                "test_type": _text(case.get("test_type")),
+                "purpose": _text(case.get("purpose")),
+                "suburb": _text(case.get("suburb")),
+                "state": _text(case.get("state")),
+                "postcode": _text(case.get("postcode")),
+                "tailgate": _text(case.get("tailgate")),
+                "rank": exp.rank,
+                "expected_carrier": exp.carrier,
+                "actual_carrier": act.carrier if act else "",
+                "carrier_status": carrier_status,
+                "expected_service": exp.service,
+                "actual_service": act.service if act else "",
+                "service_status": service_status,
+                "expected_estimate_ex_gst": f"{exp.estimate_ex_gst:.2f}",
+                "actual_estimate_ex_gst": f"{act.estimate_ex_gst:.2f}" if act else "",
+                "difference": f"{diff:.2f}" if diff is not None else "",
+                "estimate_status": estimate_status,
+                "expected_total_weight_kg": "",
+                "actual_total_weight_kg": "",
+                "weight_status": "",
+                "expected_total_cubic_m3": "",
+                "actual_total_cubic_m3": "",
+                "cubic_status": "",
+                "actual_rating_cubic_m3": "",
+                "pallet_cubic_adjustment_m3": "",
+                "overall_status": overall_status,
+                "validation_status": exp.validation_status,
+                "source_page": exp.source_page,
+                "notes": notes,
+            })
+
+        return report_rows
+
+    def _compare_components(
+        self,
+        case_rows: list[dict[str, str]],
+        component_rows: dict[str, dict[str, str]],
+        actual_by_case: dict[str, list[ActualOutput]],
+        case_errors: dict[str, str],
+        component_tolerance: Decimal,
+    ) -> list[dict[str, object]]:
+        report_rows: list[dict[str, object]] = []
+        for case in case_rows:
+            case_id = _upper(case.get("case_id"))
+            comp = component_rows.get(case_id, {})
+            actual_first = (actual_by_case.get(case_id) or [None])[0]
+
+            expected_weight_text = _text(comp.get("total_weight_kg") or case.get("total_weight_kg"))
+            expected_cubic_text = _text(comp.get("total_cubic_m3") or case.get("total_cubic_m3"))
+            expected_weight, actual_weight, weight_status = _component_decimal(
+                actual_first.total_weight_kg if actual_first else None,
+                expected_weight_text,
+                component_tolerance,
+            )
+            expected_cubic, actual_cubic, cubic_status = _component_decimal(
+                actual_first.total_cubic_m3 if actual_first else None,
+                expected_cubic_text,
+                component_tolerance,
+            )
+
+            statuses = [status for status in [weight_status, cubic_status] if status != "SKIPPED"]
+            if not statuses:
+                overall_status = "SKIPPED"
+            else:
+                overall_status = "OK" if all(status == "OK" for status in statuses) else "FAIL"
+
+            report_rows.append({
+                "row_type": "component_totals",
+                "check_type": "component_totals",
+                "case_id": case_id,
+                "test_type": _text(case.get("test_type")),
+                "purpose": _text(case.get("purpose")),
+                "suburb": _text(case.get("suburb")),
+                "state": _text(case.get("state")),
+                "postcode": _text(case.get("postcode")),
+                "tailgate": _text(case.get("tailgate")),
+                "rank": "",
+                "expected_carrier": _upper(comp.get("expected_cheapest_carrier")),
+                "actual_carrier": actual_first.carrier if actual_first else "",
+                "carrier_status": "",
+                "expected_service": _upper(comp.get("expected_cheapest_service")),
+                "actual_service": actual_first.service if actual_first else "",
+                "service_status": "",
+                "expected_estimate_ex_gst": _text(comp.get("expected_cheapest_estimate_ex_gst")),
+                "actual_estimate_ex_gst": f"{actual_first.estimate_ex_gst:.2f}" if actual_first else "",
+                "difference": "",
+                "estimate_status": "",
+                "expected_total_weight_kg": expected_weight,
+                "actual_total_weight_kg": actual_weight,
+                "weight_status": weight_status,
+                "expected_total_cubic_m3": expected_cubic,
+                "actual_total_cubic_m3": actual_cubic,
+                "cubic_status": cubic_status,
+                "actual_rating_cubic_m3": str(actual_first.rating_cubic_m3) if actual_first and actual_first.rating_cubic_m3 is not None else "",
+                "pallet_cubic_adjustment_m3": str(actual_first.pallet_cubic_adjustment_m3) if actual_first and actual_first.pallet_cubic_adjustment_m3 is not None else "",
+                "overall_status": overall_status,
+                "validation_status": _text(comp.get("validation_status") or case.get("validation_status")),
+                "source_page": _text(comp.get("source_page") or comp.get("source") or case.get("source_page") or case.get("source")),
+                "notes": case_errors.get(case_id, _text(comp.get("notes") or case.get("notes"))),
+            })
+        return report_rows
+
+    def _summarize(self, report_rows: list[dict[str, object]]) -> dict[str, int]:
+        ok = sum(1 for row in report_rows if row.get("overall_status") == "OK")
+        fail = sum(1 for row in report_rows if row.get("overall_status") == "FAIL")
+        skipped = sum(1 for row in report_rows if row.get("overall_status") == "SKIPPED")
+        return {"rows": len(report_rows), "ok": ok, "fail": fail, "skipped": skipped}

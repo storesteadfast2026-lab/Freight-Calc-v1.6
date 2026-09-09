@@ -1,0 +1,193 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #ftp-inbox-result-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.30);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  #ftp-inbox-result-panel {
+    width: min(1100px, 96vw);
+    max-height: 82vh;
+    overflow: auto;
+    background: var(--body-bg, #fff);
+    color: var(--body-fg, #333);
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+    padding: 20px 22px;
+    box-sizing: border-box;
+  }
+  #ftp-inbox-result-panel h2 { margin: 0 0 4px; }
+  #ftp-inbox-result-panel .ftp-subtitle {
+    margin: 0 0 16px;
+    color: var(--body-quiet-color, #666);
+  }
+  #ftp-inbox-result-panel table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 16px;
+  }
+  #ftp-inbox-result-panel th,
+  #ftp-inbox-result-panel td {
+    text-align: left;
+    padding: 8px 9px;
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+    vertical-align: top;
+  }
+  #ftp-inbox-result-panel th { white-space: nowrap; }
+  .ftp-status-ok, .ftp-status-new, .ftp-status-error { font-weight: 700; }
+  .ftp-summary-box {
+    background: var(--darkened-bg, #f4f4f4);
+    border-left: 4px solid var(--primary, #417690);
+    padding: 10px 12px;
+    margin: 12px 0 16px;
+  }
+  .ftp-ok-row { text-align: right; }
+  #ftp-inbox-ok-button { min-width: 90px; }
+  #ftp-inbox-check-button[disabled] { cursor: wait; opacity: 0.75; }
+  #ftp-inbox-progress {
+    display: none;
+    margin: 10px 0 14px;
+    padding: 10px 12px;
+    background: var(--darkened-bg, #f4f4f4);
+    border-left: 4px solid var(--primary, #417690);
+  }
+  #ftp-inbox-progress.visible { display: block; }
+</style>
+{% endblock %}
+
+{% block object-tools-items %}
+<li>
+  <form
+    id="ftp-inbox-check-form"
+    method="post"
+    action="{% url 'admin:imports_externaldatafile_check_ftp_inbox' %}"
+    style="display:inline; margin:0;"
+  >
+    {% csrf_token %}
+    {% if request.GET.client__id__exact %}
+      <input type="hidden" name="client__id__exact" value="{{ request.GET.client__id__exact }}">
+    {% endif %}
+    <button id="ftp-inbox-check-button" type="submit">CHECK FTP INBOX +</button>
+  </form>
+</li>
+<li>
+  <a href="{% url 'admin:imports_externaldatafile_add' %}" class="addlink">
+    MANUAL FILE UPLOAD
+  </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<div id="ftp-inbox-progress" role="status" aria-live="polite">
+  <strong>Checking FTP Inbox...</strong><br>
+  Reading <code>uploaded_data</code>, checking recognised files and verifying SHA-256.
+</div>
+
+{{ block.super }}
+
+{% if ftp_inbox_result %}
+<div id="ftp-inbox-result-overlay" role="dialog" aria-modal="true" aria-labelledby="ftp-inbox-result-title">
+  <div id="ftp-inbox-result-panel">
+    <h2 id="ftp-inbox-result-title">FTP Inbox check completed</h2>
+    <p class="ftp-subtitle">
+      Checked: {{ ftp_inbox_result.checked_at_display }}
+      &nbsp;|&nbsp;
+      Source: <code>{{ ftp_inbox_result.root }}</code>
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>FTP modified</th>
+          <th>Size</th>
+          <th>SHA check</th>
+          <th>Result</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for file in ftp_inbox_result.files %}
+        <tr>
+          <td><strong>{{ file.filename }}</strong><br><small>{{ file.file_type }}</small></td>
+          <td>{{ file.source_modified_at_display|default:"-" }}</td>
+          <td>{{ file.size_display|default:"-" }}</td>
+          <td>{% if file.sha_checked %}Verified{% else %}Not completed{% endif %}</td>
+          <td>
+            {% if file.result_label == "NEW VERSION" %}
+              <span class="ftp-status-new">NEW VERSION</span>
+            {% elif file.result_label == "UNCHANGED" %}
+              <span class="ftp-status-ok">UNCHANGED</span>
+            {% else %}
+              <span class="ftp-status-error">{{ file.result_label }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {{ file.action_label }}
+            {% if file.previous_snapshot_id %}
+              <br><small>
+                Previous snapshot #{{ file.previous_snapshot_id }}
+                {% if file.previous_snapshot_at_display %}- {{ file.previous_snapshot_at_display }}{% endif %}
+              </small>
+            {% endif %}
+            {% if file.error %}<br><small>{{ file.error }}</small>{% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No recognised FTP files were found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="ftp-summary-box">
+      <strong>
+        {{ ftp_inbox_result.recognised }} checked ·
+        {{ ftp_inbox_result.new_snapshots }} new ·
+        {{ ftp_inbox_result.unchanged }} unchanged ·
+        {{ ftp_inbox_result.errors }} errors
+      </strong>
+      <br>
+      No operational freight data was changed.
+    </div>
+
+    <div class="ftp-ok-row">
+      <button type="button" id="ftp-inbox-ok-button" class="default">OK</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  const form = document.getElementById('ftp-inbox-check-form');
+  const button = document.getElementById('ftp-inbox-check-button');
+  const progress = document.getElementById('ftp-inbox-progress');
+
+  if (form && button && progress) {
+    form.addEventListener('submit', function () {
+      button.disabled = true;
+      button.textContent = 'CHECKING FTP INBOX...';
+      progress.classList.add('visible');
+    });
+  }
+
+  const overlay = document.getElementById('ftp-inbox-result-overlay');
+  const okButton = document.getElementById('ftp-inbox-ok-button');
+  if (overlay && okButton) {
+    okButton.addEventListener('click', function () {
+      overlay.remove();
+    });
+    okButton.focus();
+  }
+})();
+</script>
+{% endblock %}

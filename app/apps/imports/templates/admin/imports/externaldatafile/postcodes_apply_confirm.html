@@ -1,0 +1,90 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div id="content-main">
+<p>
+  <strong>Source file:</strong> {{ original.original_filename }}<br>
+  <strong>Status:</strong> {{ original.status }}<br>
+  <strong>Policy:</strong> postcodes.csv is authoritative.
+</p>
+
+<p>
+  This operation is separate from <strong>Save</strong>. It revalidates approved
+  Review decisions inside one database transaction before changing operational
+  postcode data.
+</p>
+
+<div style="margin:12px 0;padding:10px;background:#f6f6f6;border-left:4px solid #417690;">
+  Approved: <strong>{{ plan.approved_count }}</strong> |
+  DB changes: <strong>{{ plan.change_count }}</strong> |
+  Already applied/no-change: <strong>{{ plan.no_change_count }}</strong> |
+  Skipped: <strong>{{ plan.skipped_count }}</strong>
+</div>
+
+{% if plan.blockers %}
+<div class="errornote">
+  <strong>Apply is blocked.</strong> No operational changes will be made.
+</div>
+<ul>
+  {% for blocker in plan.blockers %}<li>{{ blocker }}</li>{% endfor %}
+</ul>
+{% elif not plan.change_count %}
+<div style="margin:12px 0;padding:10px;background:#edf7ed;border-left:4px solid #417690;">
+  <strong>All approved changes are already applied.</strong>
+  No database changes are required. No action is available on this screen.
+</div>
+{% endif %}
+
+<table style="width:100%;max-width:1200px;border-collapse:collapse;">
+<thead>
+<tr>
+  <th style="text-align:left;padding:6px;">Source / Final</th>
+  <th style="text-align:left;padding:6px;">Current DB target</th>
+  <th style="text-align:left;padding:6px;">Decision</th>
+  <th style="text-align:left;padding:6px;">Operation</th>
+</tr>
+</thead>
+<tbody>
+{% for item in plan.items %}
+  {% if item.decision == "ACCEPT_SOURCE" or item.decision == "MANUAL_OVERRIDE" %}
+  <tr style="border-top:1px solid #ddd;">
+    <td style="padding:6px;">
+      <strong>{{ item.final.suburb }}</strong>
+      {{ item.final.state }} {{ item.final.postcode }}
+    </td>
+    <td style="padding:6px;">
+      {% if item.target_before %}
+        {{ item.target_before.suburb }} {{ item.target_before.state }}
+        {{ item.target_before.postcode }}
+        <small>(ID {{ item.target_id }})</small>
+      {% else %}-{% endif %}
+    </td>
+    <td style="padding:6px;">{{ item.decision }}</td>
+    <td style="padding:6px;">
+      <strong>{{ item.display_action }}</strong>
+      {% if item.blockers %}
+        <br><small>{{ item.blockers|join:"; " }}</small>
+      {% endif %}
+    </td>
+  </tr>
+  {% endif %}
+{% endfor %}
+</tbody>
+</table>
+
+<div style="margin-top:18px;">
+  <a class="button" href="{{ change_url }}">Back to Review</a>
+  {% if not plan.blockers and plan.approved_count and plan.change_count %}
+  <form method="post" style="display:inline;margin-left:8px;">
+    {% csrf_token %}
+    <input type="hidden" name="confirm" value="yes">
+    <input
+      type="submit"
+      value="Apply approved changes"
+      class="default"
+      onclick="return confirm('Apply the approved postcode changes to the operational database?');"
+    >
+  </form>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

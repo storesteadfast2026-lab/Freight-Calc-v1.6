@@ -1,0 +1,29 @@
+<div class="postcodes-review-controls">
+  {% for subwidget in widget.subwidgets %}
+    {% if forloop.counter == 1 %}
+      <div class="postcodes-note-row">
+        {% include subwidget.template_name with widget=subwidget %}
+      </div>
+      <div class="postcodes-manual-override" hidden>
+        <div class="postcodes-override-title">Final override</div>
+        <div class="postcodes-override-grid">
+    {% elif forloop.counter == 2 %}
+          <label class="postcodes-override-field postcodes-override-field-suburb">
+            <span>Suburb</span>
+            {% include subwidget.template_name with widget=subwidget %}
+          </label>
+    {% elif forloop.counter == 3 %}
+          <label class="postcodes-override-field postcodes-override-field-state">
+            <span>State</span>
+            {% include subwidget.template_name with widget=subwidget %}
+          </label>
+    {% elif forloop.counter == 4 %}
+          <label class="postcodes-override-field postcodes-override-field-postcode">
+            <span>Postcode</span>
+            {% include subwidget.template_name with widget=subwidget %}
+          </label>
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>

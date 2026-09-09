@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ estimate.reference }} Freight Estimate</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/saved_estimates/estimates.css">
+</head>
+<body class="estimate-print-body">
+<main class="estimate-print-page">
+  <div class="estimate-print-toolbar">
+    <button class="estimate-action" type="button" onclick="returnToPreviousPage()">Back</button>
+    <button class="estimate-action" type="button" onclick="window.print()">Print / Save PDF</button>
+  </div>
+  <header class="estimate-document-header">
+    <div>
+      <h1>Freight estimate</h1>
+      <p>{{ estimate.reference }}</p>
+    </div>
+    <div>
+      <strong>{{ estimate.client.name }}</strong>
+      <p>{{ estimate.created_at|date:"d M Y H:i" }}</p>
+    </div>
+  </header>
+
+  <section class="estimate-document-section">
+    <h2>Shipment</h2>
+    <dl class="estimate-summary-grid">
+      <div><dt>From</dt><dd>{% if estimate.input_snapshot.from_address %}{{ estimate.input_snapshot.from_address.name }}{% else %}Default / Not selected{% endif %}</dd></div>
+      <div><dt>Destination</dt><dd>{{ estimate.destination_label }}</dd></div>
+      <div><dt>Tailgate</dt><dd>{{ estimate.input_snapshot.tailgate }}</dd></div>
+      <div><dt>Cubic margin</dt><dd>{{ estimate.input_snapshot.cubic_margin_percent }}%</dd></div>
+      <div><dt>Total weight</dt><dd>{{ estimate.total_weight_kg|default:"—" }} kg</dd></div>
+      <div><dt>Total cubic</dt><dd>{{ estimate.total_cubic_m3|default:"—" }} m³</dd></div>
+    </dl>
+  </section>
+
+  <section class="estimate-document-section">
+    <h2>Freight items</h2>
+    <table class="estimate-table">
+      <thead><tr><th>SKU</th><th>Qty</th><th>Type</th><th>L</th><th>W</th><th>H</th><th>Weight</th><th>Cubic</th></tr></thead>
+      <tbody>
+        {% for line in estimate.input_snapshot.lines %}
+          <tr>
+            <td>{{ line.sku }}</td><td>{{ line.quantity }}</td><td>{{ line.freight_type }}</td>
+            <td>{{ line.length_m }}</td><td>{{ line.width_m }}</td><td>{{ line.height_m }}</td>
+            <td>{{ line.weight_kg }}</td><td>{{ line.cubic_m3 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="estimate-document-section">
+    <h2>Available freight options</h2>
+    <table class="estimate-table">
+      <thead><tr><th>Carrier</th><th>Service</th><th>Estimate ex GST</th></tr></thead>
+      <tbody>
+        {% for result in estimate.result_snapshot %}
+          <tr><td>{{ result.carrier }}</td><td>{{ result.service }}</td><td>${{ result.estimate_ex_gst }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <p class="estimate-disclaimer">
+    Rates are estimates only and exclude GST. Final pricing may vary due to applicable fuel surcharges and shipment conditions.
+  </p>
+</main>
+<script>
+function returnToPreviousPage() {
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  window.location.href = `/?client=${encodeURIComponent('{{ estimate.client.code|escapejs }}')}`;
+}
+</script>
+</body>
+</html>

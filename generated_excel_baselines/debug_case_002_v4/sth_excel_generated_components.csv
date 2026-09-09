@@ -1,0 +1,2 @@
+﻿case_id,total_weight_kg,total_cubic_m3,selected_carrier,selected_service,selected_estimate_ex_gst,measured_postcode_from_excel,validation_status,source,notes
+CASE_002,1035,0.9119999999999999,TEAMEX,ROAD,140.81,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.

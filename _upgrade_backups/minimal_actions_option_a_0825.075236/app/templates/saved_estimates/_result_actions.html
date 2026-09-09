@@ -1,0 +1,23 @@
+{% if saved_estimates_enabled %}
+  <div
+    id="estimate_actions"
+    class="estimate-actions"
+    data-can-export="{% if can_export_estimates %}true{% else %}false{% endif %}"
+    hidden
+  >
+    <button id="save_estimate" type="button" class="estimate-action estimate-action-primary">
+      Save estimate
+    </button>
+    <button id="print_estimate" type="button" class="estimate-action" disabled>
+      Print / PDF
+    </button>
+    {% if can_export_estimates %}
+      <a id="export_estimate_csv" class="estimate-action estimate-action-disabled" aria-disabled="true">Export CSV</a>
+      <a id="export_estimate_xlsx" class="estimate-action estimate-action-disabled" aria-disabled="true">Export Excel</a>
+      <button id="duplicate_estimate" type="button" class="estimate-action" disabled>Duplicate</button>
+    {% endif %}
+    <button id="new_calculation" type="button" class="estimate-action">New calculation</button>
+    <span id="estimate_action_status" class="estimate-action-status" aria-live="polite"></span>
+  </div>
+{% endif %}
+

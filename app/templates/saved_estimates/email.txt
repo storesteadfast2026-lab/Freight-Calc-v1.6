@@ -1,0 +1,6 @@
+Hello,
+
+Please find attached the requested freight quotation{% if estimates|length != 1 %}s{% endif %}.
+
+Kind regards,
+Freight Calculator

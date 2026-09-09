@@ -1,0 +1,15 @@
+Version: 0717.1501
+
+Validation performed:
+- Django system check: OK
+- makemigrations --check --dry-run: No changes detected
+- 8 targeted tests: OK
+  - 6 fuel import/Admin tests
+  - 2 existing freight regression tests
+- Actual workbook cached fuel structure parsed: 37 valid rate rows
+- Required headers confirmed: master_rate, info, rate, updated, expires, warnings
+
+Limitations of the execution environment:
+- The live POSCAT URL could not be reached from the sandbox because DNS was unavailable.
+- The download path was tested through a mocked HTTP response in the Django Admin integration test.
+- A complete 109k-zone workbook import exceeded the sandbox execution window; migration and targeted import behavior are covered by automated tests and Django checks.

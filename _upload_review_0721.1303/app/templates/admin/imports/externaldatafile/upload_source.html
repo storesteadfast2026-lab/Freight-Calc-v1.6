@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <div id="content-main">
+    <p><strong>Expected source:</strong> <code>{{ expected_filename }}</code></p>
+    <p>
+      The workbook will be stored, identified by SHA-256, validated and loaded into isolated
+      reference-data tables. It will not update Product, rates, zones, carrier configuration,
+      fuel values or the freight calculator.
+    </p>
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div class="submit-row">
+        <input type="submit" value="Upload and validate" class="default">
+        <a href="{% url 'admin:imports_externaldatafile_changelist' %}" class="button cancel-link">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

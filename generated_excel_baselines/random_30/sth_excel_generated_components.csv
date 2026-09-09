@@ -1,0 +1,6 @@
+﻿case_id,total_weight_kg,total_cubic_m3,selected_carrier,selected_service,selected_estimate_ex_gst,measured_postcode_from_excel,validation_status,source,notes
+RANDOM_30_001,3165,2.492,TEAMEX,ROAD,1453.66,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+RANDOM_30_002,9262.5,10.452,TEAMEX,ROAD,6059.20,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+RANDOM_30_003,4980.5,3.952,KTI,GENERAL,2005.66,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+RANDOM_30_004,633,0.581,TEAMEX,ROAD,590.75,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+RANDOM_30_005,5756.5,19.220000000000002,TEAMEX,ROAD,4191.31,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.

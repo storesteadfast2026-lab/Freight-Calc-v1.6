@@ -1,0 +1,308 @@
+@import url("https://fonts.googleapis.com/css?family=Poppins:400,600&display=swap");
+
+/*
+Approved login visual baseline.
+The complete login card moves down from above, while the logo and fields
+appear sequentially. This preserves the supplied reference behavior without
+changing Django authentication, CSRF, messages or authorization.
+*/
+
+html {
+  background-color: #56baed;
+}
+
+body.login-body {
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background-color: #56baed;
+  color: #0d0d0d;
+  font-family: "Poppins", sans-serif;
+}
+
+.login-wrapper {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  min-height: 100vh;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+#formContent {
+  width: 90%;
+  max-width: 450px;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.login-brand {
+  padding: 30px 30px 5px;
+}
+
+.logo-main {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  margin: 10px auto 15px;
+}
+
+#formContent form {
+  display: block;
+  padding: 0 30px 10px;
+}
+
+.auth-notice {
+  display: block;
+  margin-bottom: 15px;
+  color: #333;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#formContent input[type="text"],
+#formContent input[type="password"] {
+  display: inline-block;
+  width: 85%;
+  margin: 5px;
+  padding: 15px 32px;
+  box-sizing: border-box;
+  border: 2px solid #f6f6f6;
+  border-radius: 5px;
+  background-color: #f6f6f6;
+  color: #0d0d0d;
+  font-family: inherit;
+  font-size: 16px;
+  text-align: center;
+  transition: all 0.5s ease-in-out;
+}
+
+#formContent input[type="text"]:focus,
+#formContent input[type="password"]:focus {
+  outline: none;
+  border-bottom-color: #5fbae9;
+  background-color: #fff;
+}
+
+#formContent input::placeholder {
+  color: #999;
+}
+
+#formContent input[type="submit"] {
+  display: inline-block;
+  margin: 10px 20px 25px;
+  padding: 15px 80px;
+  border: 0;
+  border-radius: 5px;
+  background-color: #56baed;
+  box-shadow: 0 10px 30px rgba(95, 186, 233, 0.4);
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: center;
+  text-transform: uppercase;
+  transition: all 0.3s ease-in-out;
+}
+
+#formContent input[type="submit"]:hover {
+  background-color: #39ace7;
+}
+
+#formContent input[type="submit"]:active {
+  transform: scale(0.95);
+}
+
+#formFooter {
+  margin-top: 10px;
+  padding: 25px;
+  border-top: 1px solid #dce8f1;
+  background-color: #f6f6f6;
+  text-align: center;
+}
+
+.footer-caption {
+  margin-bottom: 5px;
+  color: #666;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.footer-logo {
+  display: block;
+  width: 100%;
+  max-width: 140px;
+  height: auto;
+  margin: 10px auto 0;
+}
+
+.login-feedback {
+  display: grid;
+  gap: 8px;
+  width: 85%;
+  margin: 10px auto;
+  box-sizing: border-box;
+}
+
+.login-message {
+  padding: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 5px;
+  background: #f8fafc;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.login-message-error {
+  border-color: #f5c6cb;
+  background-color: #fdeaea;
+  color: #b42318;
+}
+
+.login-message-warning {
+  border-color: #fec84b;
+  background-color: #fffaeb;
+  color: #93370d;
+}
+
+.login-message-success {
+  border-color: #6ce9a6;
+  background-color: #ecfdf3;
+  color: #027a48;
+}
+
+.login-message-info {
+  border-color: #84adff;
+  background-color: #eff4ff;
+  color: #175cd3;
+}
+
+/* Original supplied movement: the full card starts one card-height above. */
+.fadeInDown {
+  animation: fadeInDown 1s both;
+}
+
+@keyframes fadeInDown {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -100%, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Original sequential fade timing. */
+.fadeIn {
+  opacity: 0;
+  animation: fadeIn 1s ease-in forwards;
+}
+
+.fadeIn.first {
+  animation-delay: 0.4s;
+}
+
+.fadeIn.second {
+  animation-delay: 0.6s;
+}
+
+.fadeIn.third {
+  animation-delay: 0.8s;
+}
+
+.fadeIn.fourth {
+  animation-delay: 1s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Invalid credentials keep the approved card and add the supplied shake cue. */
+.shake {
+  animation: shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (max-width: 768px) {
+  .login-wrapper {
+    padding: 14px;
+  }
+
+  #formContent {
+    width: 100%;
+    max-width: 500px;
+  }
+
+  .login-brand,
+  #formContent form {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  #formContent input[type="text"],
+  #formContent input[type="password"] {
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  #formContent input[type="submit"] {
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .login-feedback {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fadeInDown,
+  .fadeIn,
+  .shake {
+    opacity: 1;
+    animation: none !important;
+    transform: none !important;
+  }
+}

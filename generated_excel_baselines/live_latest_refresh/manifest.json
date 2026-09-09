@@ -1,0 +1,34 @@
+{
+  "run_id": "20260714_152158",
+  "generated_at": "2026-07-14T15:24:17",
+  "workbook_source": "C:\\Docker-Projects\\Freight-Calc-05jun\\sample_data\\V2026.R2_Unlocked_STH_Freight_Calculator.xlsx",
+  "cases_source": "C:\\Docker-Projects\\Freight-Calc-05jun\\app\\apps\\freight\\fixtures\\live_latest\\sth_excel_generated_cases.csv",
+  "source_for_cases": "C:\\Docker-Projects\\Freight-Calc-05jun\\generated_excel_baselines\\live_latest_refresh\\STH_LIVE_BASELINE_20260714_152158.xlsx",
+  "refresh_all": true,
+  "save_workbook": true,
+  "workbook_copy": "C:\\Docker-Projects\\Freight-Calc-05jun\\generated_excel_baselines\\live_latest_refresh\\STH_LIVE_BASELINE_20260714_152158.xlsx",
+  "cases_run": 20,
+  "outputs_generated": 77,
+  "components_generated": 20,
+  "debug_rows_generated": 20,
+  "excel_sheet": "Calculator",
+  "input_cells": {
+    "suburb": "C7",
+    "state": "D7",
+    "postcode": "E7",
+    "tailgate": "E11",
+    "preselect": "C13",
+    "sku_start": "C15",
+    "qty_start": "D15",
+    "line_count": 8
+  },
+  "output_cells": {
+    "rank_start_row": 6,
+    "carrier_col": "O",
+    "service_col": "P",
+    "estimate_col": "Q",
+    "rank_count": 4,
+    "total_weight_cell": "J23",
+    "total_cubic_cell": "J24"
+  }
+}

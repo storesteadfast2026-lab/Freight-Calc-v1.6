@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <div id="content-main">
+    <p><strong>File:</strong> {{ object.original_filename }}</p>
+    <p><strong>Client:</strong> {{ object.client }}</p>
+    <p><strong>Status:</strong> {{ object.get_status_display }}</p>
+    <p>{{ explanation }}</p>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form %}{{ form.as_p }}{% endif %}
+      <div class="submit-row">
+        <input type="submit" value="{{ action_label }}" class="default">
+        <a href="{{ back_url }}" class="button cancel-link">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

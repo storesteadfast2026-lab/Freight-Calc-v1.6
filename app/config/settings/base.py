@@ -1,0 +1,131 @@
+﻿from pathlib import Path
+import os
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'unsafe-local-key')
+DEBUG = os.getenv('DEBUG', '0') == '1'
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'apps.clients',
+    'apps.locations',
+    'apps.products',
+    'apps.carriers',
+    'apps.rates',
+    'apps.imports',
+    'apps.audit',
+    'apps.authentication_gateway.apps.AuthenticationGatewayConfig',
+    'apps.freight',
+    'apps.saved_estimates.apps.SavedEstimatesConfig',
+]
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.authentication_gateway.middleware.ExternalAuthMiddleware',
+    'apps.authentication_gateway.middleware.DjangoAdminAccessMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'config.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('POSTGRES_DB', 'freight_platform'),
+        'USER': os.getenv('POSTGRES_USER', 'freight_user'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'freight_password'),
+        'HOST': os.getenv('POSTGRES_HOST', 'localhost'),
+        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+    }
+}
+
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'Australia/Adelaide'
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = Path(os.getenv('MEDIA_ROOT', str(BASE_DIR / 'uploaded_data')))
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/admin/login/"
+
+
+CSRF_FAILURE_VIEW = 'apps.authentication_gateway.views.csrf_failure'
+CALCULATOR_REQUIRE_AUTH = os.getenv('CALCULATOR_REQUIRE_AUTH', '0') == '1'
+EXTERNAL_AUTH_HEADER = os.getenv('EXTERNAL_AUTH_HEADER', 'HTTP_X_AUTH_USER')
+
+# Freight calculation constants matching the Excel workbook defaults.
+# Excel source: CalcLines!J7 = pallet weight, CalcLines!K7 = pallet cubic.
+# These can be changed later through environment variables without code changes.
+FREIGHT_PALLET_WEIGHT_KG = os.getenv('FREIGHT_PALLET_WEIGHT_KG', '32.5')
+FREIGHT_PALLET_CUBIC_M3 = os.getenv('FREIGHT_PALLET_CUBIC_M3', '0.02')
+
+# Manual fuel import source and validation limits.
+FUEL_SOURCE_URL = os.getenv('FUEL_SOURCE_URL', 'https://www.poscat.com.au/fuelsc/fuel.csv')
+FUEL_FETCH_TIMEOUT_SECONDS = int(os.getenv('FUEL_FETCH_TIMEOUT_SECONDS', '30'))
+FUEL_RATE_MAX = os.getenv('FUEL_RATE_MAX', '1.0')
+
+# Optional, isolated persistence for verified freight calculation snapshots.
+# Disabling this flag hides the UI and blocks the saved-estimate endpoints
+# without changing the freight calculation engine or its API.
+SAVED_ESTIMATES_ENABLED = os.getenv('SAVED_ESTIMATES_ENABLED', '1') == '1'
+
+# Optional email delivery for saved estimates. This remains isolated from the
+# freight calculation engine and can be disabled without affecting calculation,
+# saving or printing.
+ESTIMATE_EMAIL_ENABLED = os.getenv('ESTIMATE_EMAIL_ENABLED', '0') == '1'
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend',
+)
+EMAIL_HOST = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', '1') == '1'
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', '0') == '1'
+EMAIL_TIMEOUT = int(os.getenv('EMAIL_TIMEOUT', '20'))
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+

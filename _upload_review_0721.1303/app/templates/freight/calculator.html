@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>STH Freight Calculator</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<main class="page">
+  <section class="card calculator-card">
+    <div class="calculator-header">
+      <h1>Freight Calculator</h1>
+      <p class="muted">STH / Steadfast Freight Calculator migration</p>
+    </div>
+    <div class="grid calculator-grid">
+      <label>From Address
+
+        <select id="from_address_id">
+          <option value="">Default / Not selected</option>
+
+          {% for addr in from_addresses %}
+            <option value="{{ addr.id }}" {% if addr.is_default %}selected{% endif %}>
+              {{ addr.name }} - {{ addr.address_line_1 }}, {{ addr.suburb }} {{ addr.state }} {{ addr.postcode }}
+            </option>
+          {% endfor %}
+        </select>
+
+      </label>
+      <label>To Suburb
+        <div class="combo-field">
+          <input id="suburb_search" placeholder="Select or type suburb" autocomplete="off" onfocus="showSuburbOptions(true)">
+          <button type="button" class="combo-toggle" aria-label="Show suburbs" onclick="showSuburbOptions(true)">⌄</button>
+          <div id="suburb_results" class="dropdown"></div>
+        </div>
+      </label>
+      <label>State <input id="state" readonly></label>
+      <label>Postcode <input id="postcode" readonly></label>
+      <label>Tailgate
+        <select id="tailgate"><option>NO</option><option>YES</option></select>
+      </label>
+      <label>Use Preselected SKU Mode
+        <select id="preselect_sku"><option>YES</option><option>NO</option></select>
+      </label>
+      <label>Cubic Margin *
+        <select id="cubic_margin_percent">
+          <option value="0">0% - No margin</option>
+          <option value="10">10% - Standard packing margin</option>
+          <option value="15">15% - Conservative packing margin</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card products-card">
+    <div class="products-table-wrap">
+    <table id="lines" class="products-table">
+      <thead><tr><th class="col-product">Product</th><th class="col-qty">Qty</th><th class="col-type">Type</th><th class="col-num">L</th><th class="col-num">W</th><th class="col-num">H</th><th class="col-num">Weight</th><th class="col-num">Cubic</th><th class="col-action"></th></tr></thead>
+      <tbody></tbody>
+      <tfoot>
+        <tr>
+          <td colspan="6" style="text-align: right;"><strong>TOTAL</strong></td>
+          <td style="text-align: right;"><input id="total_weight" class="decimal" value="0.00" readonly aria-label="Total Weight" style="text-align: right;"></td>
+          <td style="text-align: right;"><input id="total_cubic" class="decimal" value="0.000" readonly aria-label="Total Cubic" style="text-align: right;"></td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+    <button onclick="addLine()">Add line</button>
+    <button class="primary" onclick="calculate()">Calculate Freight</button>
+  </section>
+
+  <section class="card">
+    <h2>Results</h2>
+    <div id="calc_status" class="status"></div>
+    <div id="error" class="error"></div>
+    <table id="results"><thead><tr><th>Carrier</th><th>Service</th><th>Freight Estimate ex GST</th></tr></thead><tbody></tbody></table>
+    <div class="pricing-note">
+    Please note: Final pricing may vary due to applicable fuel surcharges.
+    The calculated cubic volume may also increase when multiple items are packed together.
+    </div>
+    <div class="pricing-note">
+    * Select a % margin of error to account for additional packing volume.
+    </div>
+     <div class="pricing-note">
+    ** Freight Calculator preliminary version - v0.1<br>
+    ** CubicMargin option is not WORKING
+    </div>
+  </section>
+</main>
+<script>
+const PALLET_WEIGHT_KG = Number('{{ pallet_weight_kg|default:"32.5" }}');
+const PALLET_CUBIC_M3 = Number('{{ pallet_cubic_m3|default:"0.02" }}');
+function debounce(fn, ms){let t;return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
+const suburbInput = document.getElementById('suburb_search');
+const suburbResults = document.getElementById('suburb_results');
+suburbInput.addEventListener('input', debounce(() => showSuburbOptions(false), 200));
+async function showSuburbOptions(force=false){
+  const q = suburbInput.value.trim();
+  if(!force && q.length < 2){ suburbResults.innerHTML=''; return; }
+  const res = await fetch(`/api/suburbs/?q=${encodeURIComponent(q)}`).then(r=>r.json());
+  suburbResults.innerHTML = res.results.length ? res.results.map(s=>`<button type="button" onclick='pickSuburbObj(${JSON.stringify(s)})'>${s.label}</button>`).join('') : '<span class="no-results">No suburbs loaded or no matches found</span>';
+}
+function pickSuburbObj(s){suburbInput.value=s.suburb;document.getElementById('state').value=s.state;document.getElementById('postcode').value=s.postcode;suburbResults.innerHTML='';}
+function formatNumber(value, decimals=2){
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(decimals) : (0).toFixed(decimals);
+}
+function parseNumber(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+function updateProductTotals(){
+  const rows=[...document.querySelectorAll('#lines tbody tr')];
+  let productWeight=0;
+  let productCubic=0;
+  let palletCount=0;
+
+  rows.forEach(tr=>{
+    const sku=(tr.querySelector('.sku')?.value || '').trim();
+    const qty=parseNumber(tr.querySelector('.qty')?.value);
+
+    if(!sku || qty <= 0){
+      return;
+    }
+
+    const freightType=(tr.querySelector('.ftype')?.value || '').trim().toUpperCase();
+    const weight=parseNumber(tr.querySelector('.weight')?.value);
+    const cubic=parseNumber(tr.querySelector('.cubic')?.value);
+
+    productWeight += weight * qty;
+    productCubic += cubic;
+
+    if(freightType === 'P'){
+      palletCount += qty;
+    }
+  });
+
+  const totalWeight = productWeight + (palletCount > 0.99 ? palletCount * PALLET_WEIGHT_KG : 0);
+  const totalCubic = productCubic;
+
+  document.getElementById('total_weight').value = formatNumber(totalWeight);
+  document.getElementById('total_cubic').value = formatNumber(totalCubic, 3);
+}
+function addLine(){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><div class="combo-field product-combo"><input class="sku" placeholder="Select or type SKU" oninput="productSearch(this,false);updateProductTotals()" onfocus="productSearch(this,true)"><button type="button" class="combo-toggle" aria-label="Show products" onclick="productSearch(this.parentElement.querySelector('.sku'),true)">⌄</button><div class="dropdown product_dd"></div></div></td><td><input class="qty" value="1" type="number" min="0"></td><td><input class="ftype" value="P"></td><td><input class="len decimal" value="0.00"></td><td><input class="wid decimal" value="0.00"></td><td><input class="hei decimal" value="0.00"></td><td><input class="weight decimal" value="0.00"></td><td><input class="cubic decimal" value="0.000"></td><td><button onclick="this.closest('tr').remove();updateProductTotals();">Remove</button></td>`;
+  document.querySelector('#lines tbody').appendChild(tr);
+  tr.querySelectorAll('.decimal').forEach(input =>
+    input.addEventListener('blur', () => {
+      const decimals = input.classList.contains('cubic') ? 3 : 2;
+      input.value = formatNumber(input.value, decimals);
+      updateProductTotals();
+    })
+  );
+  tr.querySelectorAll('.sku,.qty,.ftype,.weight,.cubic').forEach(input => input.addEventListener('input', updateProductTotals));
+  updateProductTotals();
+}
+
+async function productSearch(input, force=false){
+  const q=input.value.trim(); const dd=input.parentElement.querySelector('.product_dd');
+  if(!force && q.length<2){dd.innerHTML='';return;}
+  const res=await fetch(`/api/products/?client=STH&q=${encodeURIComponent(q)}`).then(r=>r.json());
+  dd.innerHTML=res.results.length ? res.results.map(p=>`<button type="button" onclick='pickProduct(this, ${JSON.stringify(p)})'>${p.label}</button>`).join('') : '<span class="no-results">No products loaded or no matches found</span>';
+}
+function pickProduct(btn,p){
+  const tr=btn.closest('tr');
+  tr.querySelector('.sku').value=p.sku;
+  tr.querySelector('.ftype').value=p.freight_type;
+  tr.querySelector('.len').value=formatNumber(p.length_m);
+  tr.querySelector('.wid').value=formatNumber(p.width_m);
+  tr.querySelector('.hei').value=formatNumber(p.height_m);
+  tr.querySelector('.weight').value=formatNumber(p.weight_kg);
+  tr.querySelector('.cubic').value=formatNumber(p.cubic_m3, 3);
+  btn.parentElement.innerHTML='';
+  updateProductTotals();
+}
+async function calculate(){
+  const status=document.getElementById('calc_status');
+  const error=document.getElementById('error');
+  const tbody=document.querySelector('#results tbody');
+  const button=document.querySelector('button.primary');
+  status.textContent='Calculating freight...';
+  error.textContent='';
+  tbody.innerHTML='';
+  button.disabled=true;
+  try{
+    const rows=[...document.querySelectorAll('#lines tbody tr')];
+    const lines=rows.map(tr=>({sku:tr.querySelector('.sku').value,quantity:tr.querySelector('.qty').value,freight_type:tr.querySelector('.ftype').value,length_m:tr.querySelector('.len').value,width_m:tr.querySelector('.wid').value,height_m:tr.querySelector('.hei').value,weight_kg:tr.querySelector('.weight').value,cubic_m3:tr.querySelector('.cubic').value}));
+    const payload={client_code:'STH',from_address_id:document.getElementById('from_address_id').value||null,suburb:suburbInput.value,state:document.getElementById('state').value,postcode:document.getElementById('postcode').value,tailgate:document.getElementById('tailgate').value,preselect_sku:document.getElementById('preselect_sku').value,cubic_margin_percent:document.getElementById('cubic_margin_percent').value,lines};
+    const resp=await fetch('/api/calculate/',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},credentials:'same-origin',body:JSON.stringify(payload)});
+    
+    let data;
+    try{ data=await resp.json(); } catch(e){ data={error:'The server did not return a valid JSON response.'}; }
+    if(!resp.ok || data.error){
+      status.textContent='';
+      error.textContent=data.detail ? `${data.error}: ${data.detail}` : (data.error || `Calculation failed with HTTP ${resp.status}`);
+      return;
+    }
+    const results=data.results||[];
+    if(!results.length){
+      status.textContent='No freight options were returned for this combination. Check suburb/state/postcode, product data, zones and rates.';
+      tbody.innerHTML='<tr><td colspan="3" class="empty-result">No available carrier/service result.</td></tr>';
+      return;
+    }
+    status.textContent=`${results.length} freight option(s) found.`;
+    tbody.innerHTML=results.map((r,i)=>`<tr class="${i===0?'best':''}"><td>${r.carrier}</td><td>${r.service}</td><td>$${formatNumber(r.estimate_ex_gst)}</td></tr>`).join('');
+  } catch(e){
+    status.textContent='';
+    error.textContent=`Unexpected browser-side error: ${e.message}`;
+  } finally {
+    button.disabled=false;
+  }
+}
+function getCookie(name){return document.cookie.split('; ').find(row=>row.startsWith(name+'='))?.split('=')[1];}
+document.addEventListener('click', (event) => {
+  if(!event.target.closest('.combo-field')){
+    document.querySelectorAll('.dropdown').forEach(dd => dd.innerHTML='');
+  }
+});
+addLine();
+</script>
+</body>
+</html>

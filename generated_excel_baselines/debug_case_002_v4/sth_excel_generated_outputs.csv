@@ -1,0 +1,5 @@
+﻿case_id,rank,expected_carrier,expected_service,expected_estimate_ex_gst,validation_status,source,notes
+CASE_002,1,TEAMEX,ROAD,140.81,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+CASE_002,2,STEA,ROAD,190.40,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+CASE_002,3,COCHRN,ROAD,356.57,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+CASE_002,4,KTI,GENERAL,947.12,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.

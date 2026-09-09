@@ -1,0 +1,222 @@
+<style>
+  .sth-compact-validation {
+    max-width: 1040px;
+    color: var(--body-fg, #333);
+  }
+  .sth-validation-head {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-left: 5px solid #2e7d32;
+    border-radius: 6px;
+    background: var(--body-bg, #fff);
+    padding: 11px 13px;
+    margin-bottom: 10px;
+  }
+  .sth-validation-head.sth-status-warning { border-left-color: #b26a00; }
+  .sth-validation-head.sth-status-error { border-left-color: #ba2121; }
+  .sth-validation-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .sth-validation-meta,
+  .sth-validation-counts {
+    color: var(--body-quiet-color, #666);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .sth-validation-counts {
+    color: var(--body-fg, #333);
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  .sth-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 6px;
+    margin: 10px 0;
+  }
+  .sth-compact-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--body-bg, #fff);
+  }
+  .sth-compact-table th,
+  .sth-compact-table td {
+    padding: 8px 9px;
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .sth-compact-table th {
+    background: var(--darkened-bg, #f4f4f4);
+    font-size: 12px;
+  }
+  .sth-compact-table tr:last-child td { border-bottom: 0; }
+  .sth-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+  .sth-delta-down { font-weight: 700; }
+  .sth-alert {
+    border-radius: 6px;
+    margin: 8px 0;
+    padding: 9px 11px;
+  }
+  .sth-alert-warning { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+  .sth-alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+  .sth-alert-info { background: #cff4fc; color: #055160; border: 1px solid #b6effb; }
+  .sth-details {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    background: var(--body-bg, #fff);
+  }
+  .sth-details summary { cursor: pointer; font-weight: 600; }
+  .sth-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .sth-chip {
+    border: 1px solid var(--hairline-color, #ccc);
+    border-radius: 999px;
+    background: var(--darkened-bg, #f4f4f4);
+    padding: 3px 8px;
+    font-family: var(--font-family-monospace, monospace);
+    font-size: 12px;
+  }
+  .sth-raw-json {
+    max-height: 360px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 9px 0 0;
+    padding: 10px;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f4f4f4);
+  }
+  .sth-tech-table { margin-top: 8px; }
+  .sth-tech-table th { width: 190px; }
+</style>
+
+<div class="sth-compact-validation">
+  <div class="sth-validation-head {{ status_class }}">
+    <div class="sth-validation-title">FUEL VALIDATION — {{ status_label|upper }}</div>
+    <div class="sth-validation-meta">
+      Updated {{ summary.source_updated|default:"—" }} ·
+      Expires {{ summary.source_expires|default:"—" }} ·
+      {{ summary.rows_valid|default:0 }}/{{ summary.rows_received|default:0 }} valid ·
+      SHA {{ sha256_short }}
+    </div>
+    <div class="sth-validation-counts">
+      {{ summary.configs_to_update|default:0 }} changes ·
+      {{ summary.configs_unchanged|default:0 }} unchanged ·
+      {{ django_ratecards_missing|length }} Django ratecard{{ django_ratecards_missing|length|pluralize }} missing ·
+      {{ errors|length }} error{{ errors|length|pluralize }}
+    </div>
+  </div>
+
+  {% if change_rows %}
+    <div class="sth-table-wrap">
+      <table class="sth-compact-table">
+        <thead>
+          <tr>
+            <th>Carrier / Service</th>
+            <th>Ratecard</th>
+            <th class="sth-num">Current</th>
+            <th class="sth-num">New</th>
+            <th class="sth-num">Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in change_rows %}
+            <tr>
+              <td><strong>{{ row.carrier }}</strong> / {{ row.service }}</td>
+              <td><code>{{ row.ratecard }}</code></td>
+              <td class="sth-num">{{ row.current_rate_display }}</td>
+              <td class="sth-num">{{ row.new_rate_display }}</td>
+              <td class="sth-num sth-delta-down">{{ row.difference_display }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="sth-alert sth-alert-info">No fuel configuration changes were detected.</div>
+  {% endif %}
+
+  {% for error in errors %}
+    <div class="sth-alert sth-alert-error"><strong>Error:</strong> {{ error }}</div>
+  {% endfor %}
+
+  {% if django_ratecards_missing %}
+    <div class="sth-alert sth-alert-warning">
+      <strong>Missing from file:</strong>
+      {% for value in django_ratecards_missing %}<code>{{ value }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+      Existing fuel levy will be preserved.
+    </div>
+  {% endif %}
+
+  {% for warning in warnings %}
+    <div class="sth-alert sth-alert-warning">{{ warning }}</div>
+  {% endfor %}
+
+  <details class="sth-details">
+    <summary>Additional details</summary>
+
+    {% if unchanged_rows %}
+      <details class="sth-details">
+        <summary>Unchanged configurations ({{ unchanged_rows|length }})</summary>
+        <div class="sth-table-wrap">
+          <table class="sth-compact-table">
+            <thead>
+              <tr><th>Carrier / Service</th><th>Ratecard</th><th class="sth-num">Fuel</th></tr>
+            </thead>
+            <tbody>
+              {% for row in unchanged_rows %}
+                <tr>
+                  <td><strong>{{ row.carrier }}</strong> / {{ row.service }}</td>
+                  <td><code>{{ row.ratecard }}</code></td>
+                  <td class="sth-num">{{ row.current_rate_display }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endif %}
+
+    <details class="sth-details">
+      <summary>Matched ratecards ({{ ratecards_matched|length }})</summary>
+      <div class="sth-chip-list">
+        {% for value in ratecards_matched %}<span class="sth-chip">{{ value }}</span>{% empty %}<span>None</span>{% endfor %}
+      </div>
+    </details>
+
+    <details class="sth-details">
+      <summary>File ratecards not used by Django ({{ ratecards_not_found|length }})</summary>
+      <div class="sth-chip-list">
+        {% for value in ratecards_not_found %}<span class="sth-chip">{{ value }}</span>{% empty %}<span>None</span>{% endfor %}
+      </div>
+    </details>
+
+    <div class="sth-table-wrap sth-tech-table">
+      <table class="sth-compact-table">
+        <tbody>
+          <tr><th>File</th><td>{{ original_filename }}</td></tr>
+          <tr><th>Source method</th><td>{{ source_method }}</td></tr>
+          <tr><th>Source URL</th><td>{{ source_url }}</td></tr>
+          <tr><th>Uploaded by</th><td>{{ uploaded_by|default:"—" }}</td></tr>
+          <tr><th>Uploaded at</th><td>{{ uploaded_at|default:"—" }}</td></tr>
+          <tr><th>Full SHA-256</th><td><code>{{ sha256|default:"—" }}</code></td></tr>
+          <tr><th>Expired</th><td>{% if summary.is_expired %}Yes{% else %}No{% endif %}</td></tr>
+          <tr><th>Duplicate file</th><td>{{ summary.duplicate_file_id|default:"No" }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="sth-details">
+    <summary>Raw validation JSON</summary>
+    <pre class="sth-raw-json">{{ raw_json }}</pre>
+  </details>
+</div>

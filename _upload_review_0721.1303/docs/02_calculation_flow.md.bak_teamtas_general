@@ -1,0 +1,83 @@
+# 02 - Freight Calculation Flow
+
+## Flujo esperado
+
+1. Recibir request.
+2. Resolver `Client`.
+3. Mantener `suburb`, `state` y `postcode` del caso.
+4. Construir freight lines desde SKU mode o manual mode.
+5. Consolidar líneas como `CalcLines`:
+   - total quantity;
+   - pallets;
+   - cartons;
+   - total weight;
+   - product cubic;
+   - rating cubic;
+   - max length;
+   - freight type for rate.
+6. Validar estado equivalente a `CalcLines!D3:L3`.
+7. Iterar carrier/service configurados en `FuelSurcharge`.
+8. Aplicar estado carrier (`L`/`X`) contextual.
+9. Resolver zona desde `ZONES`.
+10. Calcular chargeable weight:
+
+```text
+max(actual weight, rating cubic × cubic conversion)
+```
+
+11. Resolver `WeightBrk` usando selector carrier/service.
+12. Resolver rate desde `RATES` usando:
+
+```text
+carrier/service + zone + subzone + area + WeightBrk + customer + freight type
+```
+
+13. Calcular base freight.
+14. Calcular tailgate o hand unload si corresponde.
+15. Calcular overlength si corresponde.
+16. Calcular fuel surcharge.
+17. Calcular estimate ex GST.
+18. Ordenar resultados de menor a mayor precio.
+
+## Resolución de zona
+
+Regla actual documentada:
+
+```text
+1. buscar suburb__iexact + state__iexact
+2. si no existe y el carrier permite fallback, buscar postcode
+```
+
+Motivo: Excel distingue suburbs que comparten postcode. Usar solo postcode puede seleccionar el primer row de `ZONES`, que puede pertenecer a otro suburb.
+
+## Carrier-specific WeightBrk logic
+
+| Carrier | Service | Excel source | Implemented behavior |
+|---|---|---|---|
+| `TEAMEX` | `ROAD`, `GENERAL` | `BrokerTotals` rows 13 and 19 | `<751 = 1`, `>751.001 and <1501 = 2`, `>1501.001 and <3001 = 3`, `>3001.001 and <5001 = 4`, `>5000.001 = 5` |
+| `TFMX` | `ROAD` | `BrokerTotals` row 15 | `<251 = 1`, `>251.001 and <751 = 2`, `>751.001 and <1501 = 3`, `>1501.001 and <3001 = 4`, `>3001.001 and <5000 = 5`, `>5000.001 = 6` |
+| `TEAMTAS` | `GENERAL` | `BrokerTotals` row 20 | `<7.99 = 1`, `>=8 and <12.99 = 2`, `>=13 and <15.99 = 3`, `>=16 and <17.99 = 3`, `>=18 = 5` |
+| `MACHIPE` / `MIPEC` | `ROAD` | `BrokerTotals` rows 17 and 21 | `>30 = 2`; otherwise blank |
+| Other carriers | Any | no active `BrokerTotals` break formula found | blank `WeightBrk` |
+
+## Base freight
+
+La fórmula genérica actual es:
+
+```text
+base = ROUNDUP(MAX(minimum, basic + subsequent + per_kg × chargeable_weight), 2)
+```
+
+Advertencia: no todos los carriers necesariamente usan la fórmula genérica. Caso abierto:
+
+```text
+TEAMTAS GENERAL / WEEGENA TAS 7304 / BRH4443 qty 2
+Excel: 828.03
+Django observado antes de ajuste: 663983.07
+```
+
+El diagnóstico muestra que usar `per_kg × kg / 1000` baja el cálculo a `665.81`, pero todavía falta explicar `162.22`. Ver `docs/12_validation_findings_log.md`.
+
+## Regression warning
+
+`BrokerTotals` contiene fórmulas específicas por carrier. Todo branch nuevo debe quedar cubierto por una batería Excel vs Django antes de producción.

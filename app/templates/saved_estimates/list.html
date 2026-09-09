@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Saved estimates</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/saved_estimates/estimates.css">
+  <script src="/static/saved_estimates/estimate_email.js" defer></script>
+</head>
+<body class="calculator-page">
+<header class="fc-header">
+  <div class="fc-header-inner">
+    <div class="fc-brand">
+      <strong>Saved estimates</strong>
+      <span>Verified freight calculation snapshots</span>
+    </div>
+    <div class="fc-account">
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="fc-signout">Sign out</button>
+      </form>
+    </div>
+  </div>
+</header>
+<main class="estimate-page">
+  <section class="card estimate-list-card">
+    <form method="post" action="{% url 'saved_estimates:email' %}" id="estimate-email-form">
+      {% csrf_token %}
+      <input type="hidden" name="return_client" value="{{ requested_client }}">
+      <div class="estimate-list-heading">
+        <div>
+          <h1>Saved estimates</h1>
+          <p>Customers see only estimates they created. Internal users see all estimates for their authorised clients, regardless of who created them.</p>
+        </div>
+        <div class="estimate-list-heading-actions">
+          <button
+            id="email-selected"
+            type="submit"
+            class="estimate-action"
+            disabled
+          >Email selected</button>
+
+          <a
+            class="estimate-action"
+            href="{% url 'freight_calculator' %}{% if requested_client %}?client={{ requested_client|urlencode }}{% endif %}"
+            >Back to calculator</a>
+
+          
+        </div>
+      </div>
+
+      {% if messages %}
+        <div class="estimate-messages" aria-live="polite">
+          {% for message in messages %}
+            <p class="estimate-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if estimates %}
+        <div class="estimate-email-controls">
+          {% if is_customer_user %}
+            <span class="estimate-recipient-label">Email to</span>
+            <strong id="customer-recipient">{{ customer_recipient|default:"No registered email" }}</strong>
+            <input type="hidden" name="recipient" value="{{ customer_recipient }}">
+          {% else %}
+            <label for="estimate-recipient">Email to</label>
+            <select id="estimate-recipient" name="recipient" disabled>
+              <option value="">Select estimates first</option>
+            </select>
+          {% endif %}
+          <span id="estimate-selection-count">0 selected</span>
+          {% if not estimate_email_enabled %}
+            <span class="estimate-email-unavailable">Email delivery is not configured.</span>
+          {% endif %}
+        </div>
+
+        <div class="estimate-table-wrap">
+          <table class="estimate-table">
+            <thead>
+              <tr>
+                <th class="estimate-select-cell">
+                  <input id="select-all-estimates" type="checkbox" aria-label="Select all estimates for one client">
+                </th>
+                <th>Reference</th>
+                <th>Created</th>
+                <th>Client</th>
+                {% if not is_customer_user %}<th>Created by</th>{% endif %}
+                <th>Destination</th>
+                <th>Best estimate ex GST</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for estimate in estimates %}
+                <tr>
+                  <td class="estimate-select-cell">
+                    <input
+                      class="estimate-selector"
+                      type="checkbox"
+                      name="estimate_ids"
+                      value="{{ estimate.pk }}"
+                      data-client="{{ estimate.client.code }}"
+                      aria-label="Select {{ estimate.reference }}"
+                    >
+                  </td>
+                  <td><strong>{{ estimate.reference }}</strong></td>
+                  <td>{{ estimate.created_at|date:"d M Y H:i" }}</td>
+                  <td>{{ estimate.client.code }}</td>
+                  {% if not is_customer_user %}<td>{{ estimate.created_by_label|default:"â€”" }}</td>{% endif %}
+                  <td>{{ estimate.destination_label|default:"—" }}</td>
+                  <td>{% if estimate.best_estimate_ex_gst != None %}${{ estimate.best_estimate_ex_gst }}{% else %}—{% endif %}</td>
+                  <td class="estimate-row-actions">
+                    <a href="{% url 'saved_estimates:print' estimate.reference %}">Print / PDF</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="estimate-empty">No saved estimates are available.</p>
+      {% endif %}
+    </form>
+  </section>
+</main>
+{{ recipient_options|json_script:"estimate-recipient-options" }}
+<script>
+window.ESTIMATE_EMAIL_ENABLED = {{ estimate_email_enabled|yesno:"true,false" }};
+window.ESTIMATE_EMAIL_MAX_SELECTION = {{ max_estimates_per_email }};
+
+</script>
+</body>
+</html>

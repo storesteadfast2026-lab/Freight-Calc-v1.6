@@ -1,0 +1,103 @@
+<div class="sth-postcodes-validation">
+<style>
+.sth-postcodes-validation{max-width:1180px;font-size:13px;line-height:1.45}
+.sth-postcodes-header{border:1px solid #d8dee4;border-left:4px solid #417690;border-radius:5px;padding:12px 14px;margin-bottom:10px;background:#fff}
+.sth-postcodes-header.sth-status-warning{border-left-color:#d39e00}
+.sth-postcodes-header.sth-status-error{border-left-color:#ba2121}
+.sth-postcodes-header.sth-status-success{border-left-color:#2e7d32}
+.sth-postcodes-title{font-weight:700;font-size:14px;margin-bottom:3px}
+.sth-postcodes-meta{color:#5b6573;font-size:12px}
+.sth-postcodes-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin:10px 0 12px}
+.sth-postcodes-metric{border:1px solid #d8dee4;border-radius:5px;padding:9px 10px;background:#f8f9fa}
+.sth-postcodes-metric strong{display:block;font-size:17px;margin-top:2px;color:#222}
+.sth-postcodes-alert{border:1px solid #ead7a1;background:#fff4cf;border-radius:4px;padding:8px 10px;margin:7px 0}
+.sth-postcodes-error{border-color:#e0a4a4;background:#fdecec}
+.sth-postcodes-info{border-color:#b7d9e8;background:#eaf6fb}
+.sth-postcodes-table-wrap{overflow-x:auto;margin:8px 0 12px}
+.sth-postcodes-table{width:100%;border-collapse:collapse;background:#fff}
+.sth-postcodes-table th,.sth-postcodes-table td{border:1px solid #d8dee4;padding:7px 8px;vertical-align:top;text-align:left}
+.sth-postcodes-table th{background:#f1f3f5;white-space:nowrap}
+.sth-postcodes-tag{display:inline-block;border:1px solid #c7cdd4;border-radius:10px;padding:1px 7px;background:#f8f9fa;white-space:nowrap}
+.sth-postcodes-review{background:#fff4cf;border-color:#ead7a1}
+.sth-postcodes-ok{background:#edf7ed;border-color:#b8d8b8}
+.sth-postcodes-details{margin-top:8px;border:1px solid #d8dee4;border-radius:4px;padding:7px 9px;background:#fff}
+.sth-postcodes-details summary{cursor:pointer;font-weight:600}
+.sth-postcodes-json{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8px;max-height:420px;overflow-y:auto}
+</style>
+
+<div class="sth-postcodes-header {{ status_class }}">
+  <div class="sth-postcodes-title">POSTCODES VALIDATION - {{ status_label|upper }}</div>
+  <div class="sth-postcodes-meta">Format {{ source_format }} | File {{ original_filename }} | Policy {{ activation_policy }} | SHA {{ sha256_short }}</div>
+</div>
+
+<div class="sth-postcodes-grid">
+  <div class="sth-postcodes-metric">Rows read<strong>{{ rows_read }}</strong></div>
+  <div class="sth-postcodes-metric">Valid candidates<strong>{{ candidate_rows }}</strong></div>
+  <div class="sth-postcodes-metric">Existing confirmed<strong>{{ existing_confirmed }}</strong></div>
+  <div class="sth-postcodes-metric">New rows<strong>{{ new_rows_count }}</strong></div>
+  <div class="sth-postcodes-metric">Existing preserved<strong>{{ existing_preserved }}</strong></div>
+  <div class="sth-postcodes-metric">Excluded rows<strong>{{ excluded_rows_count }}</strong></div>
+  <div class="sth-postcodes-metric">Possible aliases<strong>{{ possible_alias_count }}</strong></div>
+  <div class="sth-postcodes-metric">Multi-postcode groups<strong>{{ multi_postcode_groups }}</strong></div>
+</div>
+
+{% for error in errors %}<div class="sth-postcodes-alert sth-postcodes-error"><strong>Error:</strong> {{ error }}</div>{% endfor %}
+{% for warning in warnings %}<div class="sth-postcodes-alert">{{ warning }}</div>{% endfor %}
+
+{% if new_rows %}
+<details class="sth-postcodes-details" open>
+<summary>New rows ({{ new_rows|length }})</summary>
+<div class="sth-postcodes-table-wrap"><table class="sth-postcodes-table">
+<thead><tr><th>Suburb</th><th>State</th><th>Postcode</th><th>Action</th><th>Possible alias</th><th>Existing postcode(s)</th><th>Review indicator</th></tr></thead>
+<tbody>
+{% for row in new_rows %}
+<tr>
+<td><strong>{{ row.suburb }}</strong></td><td>{{ row.state }}</td><td><code>{{ row.postcode }}</code></td><td>{{ row.action|default:"ADD" }}</td>
+<td>{{ row.possible_alias|default:"-" }}</td>
+<td>{% if row.existing_same_suburb_state_postcodes %}{{ row.existing_same_suburb_state_postcodes|join:", " }}{% else %}-{% endif %}</td>
+<td>{% if row.possible_alias %}<span class="sth-postcodes-tag sth-postcodes-review">Alias review</span>{% elif row.existing_same_suburb_state_postcodes %}<span class="sth-postcodes-tag sth-postcodes-review">Multiple postcode</span>{% else %}<span class="sth-postcodes-tag sth-postcodes-ok">No diagnostic flag</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+</details>
+{% endif %}
+
+{% if excluded_rows %}
+<details class="sth-postcodes-details" open>
+<summary>Excluded rows ({{ excluded_rows|length }})</summary>
+<div class="sth-postcodes-table-wrap"><table class="sth-postcodes-table">
+<thead><tr><th>Source row</th><th>Suburb</th><th>State</th><th>Postcode</th><th>Reason</th></tr></thead>
+<tbody>{% for row in excluded_rows %}<tr><td>{{ row.source_row }}</td><td>{{ row.suburb }}</td><td>{{ row.state }}</td><td><code>{{ row.postcode }}</code></td><td>{{ row.reason }}</td></tr>{% endfor %}</tbody>
+</table></div>
+</details>
+{% endif %}
+
+{% if import_summary %}
+<details class="sth-postcodes-details" open>
+<summary>Activation result</summary>
+<div class="sth-postcodes-grid">
+<div class="sth-postcodes-metric">Created<strong>{{ created_count }}</strong></div>
+<div class="sth-postcodes-metric">Updated<strong>{{ updated_count }}</strong></div>
+<div class="sth-postcodes-metric">Deleted<strong>{{ deleted_count }}</strong></div>
+<div class="sth-postcodes-metric">Renamed<strong>{{ renamed_count }}</strong></div>
+</div>
+<div class="sth-postcodes-alert sth-postcodes-info">Activation policy: <strong>{{ import_activation_policy }}</strong>{% if created_rows_origin %} | Created row origin: <strong>{{ created_rows_origin }}</strong>{% endif %}</div>
+</details>
+{% endif %}
+
+<details class="sth-postcodes-details">
+<summary>Additional details</summary>
+<div class="sth-postcodes-table-wrap"><table class="sth-postcodes-table"><tbody>
+<tr><th>File</th><td>{{ original_filename }}</td></tr>
+<tr><th>Source method</th><td>{{ source_method }}</td></tr>
+<tr><th>Full SHA-256</th><td><code>{{ sha256 }}</code></td></tr>
+<tr><th>Existing action</th><td>{{ existing_action }}</td></tr>
+<tr><th>New action</th><td>{{ new_action }}</td></tr>
+<tr><th>Not in source action</th><td>{{ not_in_source_action }}</td></tr>
+<tr><th>FreightZone required for add</th><td>{{ freightzone_required_for_add|yesno:"Yes,No" }}</td></tr>
+</tbody></table></div>
+</details>
+
+<details class="sth-postcodes-details"><summary>Raw validation JSON</summary><pre class="sth-postcodes-json">{{ raw_json }}</pre></details>
+{% if import_summary %}<details class="sth-postcodes-details"><summary>Raw activation JSON</summary><pre class="sth-postcodes-json">{{ raw_import_json }}</pre></details>{% endif %}
+</div>

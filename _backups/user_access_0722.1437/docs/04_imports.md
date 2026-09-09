@@ -1,0 +1,197 @@
+# External File Imports
+
+## Current sources
+
+The original Excel workbook references these external sources:
+
+- `product_sth.xlsx`
+- `stock_sth.xlsx`
+- `https://www.poscat.com.au/fuelsc/fuel.csv`
+- the full workbook tables for SKUs, suburbs, zones and rates
+
+The workbook command remains available for the base datasets:
+
+```powershell
+docker compose exec web python manage.py import_sth_excel /app/sample_data/V2026.R2_Unlocked_STH_Freight_Calculator.xlsx --client STH --replace
+```
+
+## Fuel source ownership
+
+Fuel now has two explicit modes:
+
+1. **Legacy workbook bootstrap**: used only when no active Admin fuel file exists, or when historical Excel validation explicitly requests `--fuel-source workbook`.
+2. **Operational Admin source**: the active `fuel.csv` downloaded/uploaded and activated in Django Admin.
+
+Normal workbook imports use:
+
+```text
+--fuel-source active
+```
+
+This imports the carrier configuration rows from `FuelSurcharge`, then reapplies the latest active Admin fuel dataset. Therefore, a later workbook `--replace` does not silently overwrite active web-managed fuel rates.
+
+Historical validation may use:
+
+```powershell
+docker compose exec web python manage.py import_sth_excel <baseline.xlsx> --client STH --replace --fuel-source workbook
+```
+
+The command `validate_excel_battery --import-workbook` selects workbook fuel during the comparison and restores the active Admin fuel dataset after a normal completed run.
+
+## Manual fuel workflow in Django Admin
+
+Open:
+
+```text
+Django Admin
+→ Imports
+→ External data files
+```
+
+Two entry paths are available:
+
+### Fetch from the official source
+
+Use:
+
+```text
+Fetch fuel from source
+```
+
+Django downloads:
+
+```text
+https://www.poscat.com.au/fuelsc/fuel.csv
+```
+
+The URL can be changed with `FUEL_SOURCE_URL` in `.env`.
+
+### Upload a local CSV copy
+
+Use:
+
+```text
+Add external data file
+```
+
+Only `FUEL` and `.csv` are accepted by the Admin upload form in this release.
+
+## Processing stages
+
+```text
+Fetch or upload
+→ store immutable file snapshot
+→ calculate SHA-256
+→ validate CSV structure and values
+→ display preview
+→ activate manually
+→ update ClientCarrierConfig.fuel_levy
+→ create AuditEvent records
+```
+
+Expected CSV columns:
+
+```text
+master_rate,info,rate,updated,expires,warnings
+```
+
+Mapping:
+
+```text
+fuel.csv.master_rate ↔ ClientCarrierConfig.ratecard
+fuel.csv.rate        → ClientCarrierConfig.fuel_levy
+```
+
+Activation is transactional. If one database operation fails, all fuel changes are rolled back.
+
+## Validation rules
+
+The service validates:
+
+- required columns;
+- non-empty file and data rows;
+- unique `master_rate` values;
+- numeric rates;
+- configurable range `0..FUEL_RATE_MAX`;
+- valid `updated` and `expires` dates;
+- expiry earlier than update;
+- duplicate file content by SHA-256;
+- CSV ratecards not present in Django;
+- Django ratecards missing from the CSV.
+
+An expired dataset is blocked. A superuser can force activation only with a written justification, which is stored in the audit metadata.
+
+## Storage
+
+Files are stored under:
+
+```text
+/app/uploaded_data/external_imports/<client>/fuel/YYYY/MM/
+```
+
+Docker persists them through:
+
+```yaml
+- ./uploaded_data:/app/uploaded_data
+```
+
+Do not commit downloaded production files to Git.
+
+## Provenance fields
+
+`ClientCarrierConfig` now records:
+
+```text
+fuel_levy
+fuel_levy_source
+fuel_levy_updated_at
+fuel_data_file
+```
+
+Possible source values in this release:
+
+```text
+LEGACY_WORKBOOK
+ADMIN_WEB_FETCH
+ADMIN_UPLOAD
+```
+
+## Rollback
+
+Only the active fuel file exposes the `Rollback` operation. A reason is mandatory. The system restores the exact previous value, source and file reference recorded during activation.
+
+## Recovery command
+
+If historical validation or another controlled operation is interrupted before restoring operational fuel, run:
+
+```powershell
+docker compose exec web python manage.py reapply_active_fuel --client STH
+```
+
+## Fuel validation summary presentation
+
+The fuel validation JSON remains stored unchanged in `ExternalDataFile.validation_summary`.
+Django Admin renders it as:
+
+- status and count cards;
+- a carrier/service/ratecard comparison table;
+- fuel rates displayed as percentages;
+- percentage-point difference between current and proposed rates;
+- warnings and errors in separate panels;
+- matched and missing ratecard coverage;
+- raw JSON collapsed under `Show raw validation JSON`.
+
+This is a presentation-only change. It does not modify validation, activation, rollback,
+audit, database fields or calculation logic.
+
+## Compact fuel validation presentation
+
+The Admin summary prioritises operational decisions:
+
+- one-line validation, source dates, valid-row count and shortened SHA-256;
+- counts for changes, unchanged configurations, Django ratecards missing from the file and errors;
+- only changed carrier/service rates in the primary table;
+- missing Django ratecards and validation errors shown immediately;
+- unchanged rows, unused file ratecards, complete file metadata and raw JSON collapsed by default.
+
+The underlying `validation_summary` JSON, validation rules, activation and rollback logic are unchanged.

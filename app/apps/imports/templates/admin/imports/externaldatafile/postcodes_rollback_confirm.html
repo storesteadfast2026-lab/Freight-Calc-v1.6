@@ -1,0 +1,5 @@
+{% extends "admin/base_site.html" %}{% block content %}<div id="content-main">
+{% if plan.batch %}<p><strong>Batch:</strong> {{ plan.batch.batch_id }}<br><strong>Applied:</strong> {{ plan.batch.applied_at }}<br><strong>Actor:</strong> {{ plan.batch.actor }}<br><strong>Changes:</strong> {{ plan.batch.change_count }}</p>{% endif %}
+{% if plan.blockers %}<div class="errornote"><strong>Rollback is blocked.</strong></div><ul>{% for blocker in plan.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>{% else %}<p>Rollback restores the exact postcode rows captured immediately before the latest Apply batch. If any affected row has changed or become referenced since Apply, rollback is blocked.</p>{% endif %}
+<div style="margin-top:18px;"><a class="button" href="{{ change_url }}">Back to Review</a>{% if not plan.blockers and plan.batch %}<form method="post" style="display:inline;margin-left:8px;">{% csrf_token %}<input type="hidden" name="confirm" value="yes"><input type="submit" value="Rollback latest apply" class="deletelink" onclick="return confirm('Rollback the latest postcode Apply batch?');"></form>{% endif %}</div>
+</div>{% endblock %}

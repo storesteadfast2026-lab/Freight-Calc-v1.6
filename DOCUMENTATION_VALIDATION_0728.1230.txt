@@ -1,0 +1,25 @@
+STH Freight Calculator - Documentation validation
+Version: 0728.1230
+Date: 2026-07-28 12:30 Australia/Adelaide
+
+VALIDATED
+- No application source, migration, template, CSS, fixture, report or workbook changed.
+- Active project path C:\Docker-Projects\Freight-Calc-Nuevo is used in Markdown.
+- No duplicate numbered docs.
+- No duplicate ADR numbers.
+- No duplicate functional decision numbers.
+- No active Placeholder documents remain.
+- Canonical business rules exist for users, products, rates and quotations.
+- Old docs/business rules and docs/decisions files are compatibility pointers only.
+- live_latest evidence: 20 cases, 77 output rows, 20 component rows, 97 report rows, 97 OK, 0 FAIL.
+- random_current evidence: 5 cases file only; output, component, baseline and report remain absent.
+- Workbook SHA-256 match confirmed between supplied standalone workbook and review-package reference copy:
+  8b7ad87349e6c05656fa44192d8b994fcd2e82f390482b60b27e237a606cafc9
+
+INTENTIONALLY OPEN
+- Complete Django test execution.
+- Correct database-summary execution.
+- Complete random_current evidence set.
+- Exact overlength formula and other Excel-dependent directed cases.
+- Quotation specification/model.
+- SMTP-backed invitation/password-reset delivery.

@@ -1,0 +1,6 @@
+{% if saved_estimates_enabled %}
+  <a class="estimate-history-link" href="{% url 'saved_estimates:list' %}?client={{ client.code|urlencode }}">
+    Saved estimates
+  </a>
+{% endif %}
+

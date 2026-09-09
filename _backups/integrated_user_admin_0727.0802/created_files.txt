@@ -1,0 +1,3 @@
+app\apps\authentication_gateway\tests\test_user_admin_integration.py
+docs\adr\0006_integrated_user_admin.md
+docs\17_user_admin_runbook.md

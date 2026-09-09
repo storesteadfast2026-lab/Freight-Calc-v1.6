@@ -1,0 +1,246 @@
+<style>
+  .sth-validation-summary {
+    max-width: 1180px;
+    color: var(--body-fg, #333);
+  }
+  .sth-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 10px;
+    margin: 0 0 16px;
+  }
+  .sth-summary-card {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 6px;
+    background: var(--body-bg, #fff);
+    padding: 11px 13px;
+    min-height: 58px;
+  }
+  .sth-summary-card .label {
+    display: block;
+    color: var(--body-quiet-color, #666);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .sth-summary-card .value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .sth-status-success { border-left: 5px solid #2e7d32; }
+  .sth-status-warning { border-left: 5px solid #b26a00; }
+  .sth-status-error { border-left: 5px solid #ba2121; }
+  .sth-section {
+    margin: 18px 0;
+  }
+  .sth-section h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+  }
+  .sth-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 6px;
+  }
+  .sth-validation-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--body-bg, #fff);
+  }
+  .sth-validation-table th,
+  .sth-validation-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .sth-validation-table th {
+    background: var(--darkened-bg, #f4f4f4);
+    font-size: 12px;
+  }
+  .sth-validation-table tr:last-child td { border-bottom: 0; }
+  .sth-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+  .sth-result {
+    display: inline-block;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    text-transform: uppercase;
+  }
+  .sth-result-change { background: #fff3cd; color: #664d03; }
+  .sth-result-unchanged { background: #d1e7dd; color: #0f5132; }
+  .sth-result-info { background: #cff4fc; color: #055160; }
+  .sth-alert {
+    border-radius: 6px;
+    margin: 8px 0;
+    padding: 10px 12px;
+  }
+  .sth-alert-warning { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+  .sth-alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+  .sth-alert-success { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
+  .sth-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+  }
+  .sth-chip {
+    border: 1px solid var(--hairline-color, #ccc);
+    border-radius: 999px;
+    background: var(--darkened-bg, #f4f4f4);
+    padding: 3px 8px;
+    font-family: var(--font-family-monospace, monospace);
+    font-size: 12px;
+  }
+  .sth-details {
+    border: 1px solid var(--hairline-color, #ddd);
+    border-radius: 6px;
+    padding: 9px 11px;
+    background: var(--body-bg, #fff);
+  }
+  .sth-details summary { cursor: pointer; font-weight: 600; }
+  .sth-raw-json {
+    max-height: 420px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 10px 0 0;
+    padding: 12px;
+    border-radius: 4px;
+    background: var(--darkened-bg, #f4f4f4);
+  }
+</style>
+
+<div class="sth-validation-summary">
+  <div class="sth-summary-grid">
+    <div class="sth-summary-card {{ status_class }}">
+      <span class="label">Validation status</span>
+      <span class="value">{{ status_label }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Rows received</span>
+      <span class="value">{{ summary.rows_received|default:0 }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Valid rows</span>
+      <span class="value">{{ summary.rows_valid|default:0 }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Invalid rows</span>
+      <span class="value">{{ summary.rows_invalid|default:0 }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Configurations changing</span>
+      <span class="value">{{ summary.configs_to_update|default:0 }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Configurations unchanged</span>
+      <span class="value">{{ summary.configs_unchanged|default:0 }}</span>
+    </div>
+    <div class="sth-summary-card">
+      <span class="label">Source updated</span>
+      <span class="value">{{ summary.source_updated|default:"—" }}</span>
+    </div>
+    <div class="sth-summary-card {% if summary.is_expired %}sth-status-error{% endif %}">
+      <span class="label">Source expires</span>
+      <span class="value">{{ summary.source_expires|default:"—" }}</span>
+    </div>
+  </div>
+
+  <section class="sth-section">
+    <h3>Fuel rate comparison</h3>
+    {% if preview_rows %}
+      <div class="sth-table-wrap">
+        <table class="sth-validation-table">
+          <thead>
+            <tr>
+              <th>Carrier</th>
+              <th>Service</th>
+              <th>Ratecard</th>
+              <th class="sth-num">Current fuel</th>
+              <th class="sth-num">New fuel</th>
+              <th class="sth-num">Difference</th>
+              <th>Result</th>
+              <th class="sth-num">Config ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview_rows %}
+              <tr>
+                <td><strong>{{ row.carrier }}</strong></td>
+                <td>{{ row.service }}</td>
+                <td><code>{{ row.ratecard }}</code></td>
+                <td class="sth-num">{{ row.current_rate_display }}</td>
+                <td class="sth-num">{{ row.new_rate_display }}</td>
+                <td class="sth-num">{{ row.difference_display }}</td>
+                <td><span class="sth-result {{ row.result_class }}">{{ row.result_label }}</span></td>
+                <td class="sth-num">{{ row.config_id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="sth-alert sth-alert-warning">No matching Django configurations were available for preview.</div>
+    {% endif %}
+  </section>
+
+  <section class="sth-section">
+    <h3>Warnings and errors</h3>
+    {% if errors %}
+      {% for error in errors %}<div class="sth-alert sth-alert-error">{{ error }}</div>{% endfor %}
+    {% else %}
+      <div class="sth-alert sth-alert-success">No validation errors were found.</div>
+    {% endif %}
+    {% for warning in warnings %}<div class="sth-alert sth-alert-warning">{{ warning }}</div>{% endfor %}
+  </section>
+
+  <section class="sth-section">
+    <h3>Ratecard coverage</h3>
+    <div class="sth-details">
+      <strong>Matched ratecards ({{ ratecards_matched|length }})</strong>
+      <div class="sth-chip-list">
+        {% for value in ratecards_matched %}<span class="sth-chip">{{ value }}</span>{% empty %}<span>None</span>{% endfor %}
+      </div>
+    </div>
+
+    {% if django_ratecards_missing %}
+      <div class="sth-alert sth-alert-warning">
+        <strong>Django ratecards missing from this file ({{ django_ratecards_missing|length }}).</strong>
+        Their current fuel levy will be preserved.
+        <div class="sth-chip-list">
+          {% for value in django_ratecards_missing %}<span class="sth-chip">{{ value }}</span>{% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    <details class="sth-details">
+      <summary>Ratecards in the file not configured in Django ({{ ratecards_not_found|length }})</summary>
+      <div class="sth-chip-list">
+        {% for value in ratecards_not_found %}<span class="sth-chip">{{ value }}</span>{% empty %}<span>None</span>{% endfor %}
+      </div>
+    </details>
+  </section>
+
+  <section class="sth-section">
+    <h3>Technical information</h3>
+    <div class="sth-table-wrap">
+      <table class="sth-validation-table">
+        <tbody>
+          <tr><th>Expired</th><td>{% if summary.is_expired %}Yes{% else %}No{% endif %}</td></tr>
+          <tr><th>Duplicate file ID</th><td>{{ summary.duplicate_file_id|default:"None" }}</td></tr>
+          <tr><th>Duplicate file status</th><td>{{ summary.duplicate_file_status|default:"None" }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="sth-details">
+    <summary>Show raw validation JSON</summary>
+    <pre class="sth-raw-json">{{ raw_json }}</pre>
+  </details>
+</div>

@@ -1,0 +1,3 @@
+﻿INCLUDED	V2026.R2_Unlocked_STH_Freight_Calculator.xlsx	C:\Docker-Projects\Freight-Calc-Nuevo\sample_data\V2026.R2_Unlocked_STH_Freight_Calculator.xlsx	SHA256=8b7ad87349e6c05656fa44192d8b994fcd2e82f390482b60b27e237a606cafc9
+INCLUDED	product_sth.xlsx	T:\Steadfast\Excel Files\STH_FGT_CALC\product_sth.xlsx	SHA256=c366836c469ce7f9d165cb52f508508927bd1b25adcff1ef23f4decd83696706
+INCLUDED	stock_sth.xlsx	T:\Steadfast\Excel Files\STH_FGT_CALC\stock_sth.xlsx	SHA256=31103c7fb9bbfbdcd971d4da44dad014ad8e48f978d42c11c205161362d88b13

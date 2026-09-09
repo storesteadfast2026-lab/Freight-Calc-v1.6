@@ -1,0 +1,84 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Steadfast Freight Portal</title>
+    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+</head>
+<body>
+<main class="login-wrapper fade-in-down" aria-labelledby="login-title">
+    <section id="formContent" class="login-card{% if form.errors %} shake{% endif %}">
+        <div class="brand-block fade-in first">
+            <a href="https://steadfastfreight.com.au/" rel="noopener noreferrer">
+                <img
+                    src="https://steadfast.net.au/wp-content/uploads/2026/03/steadfastfreight-web-logo.jpg"
+                    class="logo-main"
+                    alt="Steadfast Freight"
+                >
+            </a>
+        </div>
+
+        <form method="post" id="loginForm" novalidate>
+            {% csrf_token %}
+            <h1 id="login-title" class="auth-notice">AUTHORISED ENTRY ONLY</h1>
+
+            {% if form.errors %}
+                <div id="errorMessage" class="login-error" role="alert" aria-live="polite">The email/username or password is incorrect. Your account does not have access to that page.</div>
+            {% endif %}
+
+            <label class="sr-only" for="{{ form.username.id_for_label }}">Email or username</label>
+            {{ form.username }}
+
+            <label class="sr-only" for="{{ form.password.id_for_label }}">Password</label>
+            {{ form.password }}
+
+            {% if next %}
+                <input type="hidden" name="next" value="{{ next }}">
+            {% endif %}
+
+            <button type="submit" id="loginButton" class="login-button fade-in fourth">
+                <span class="button-label">Login</span>
+            </button>
+        </form>
+
+        <footer id="formFooter">
+            <span class="footer-text">This service is brought to you by</span>
+            <a href="https://www.steadfast.net.au" rel="noopener noreferrer">
+                <img
+                    src="https://steadfast.net.au/wp-content/uploads/2022/02/Updated-Steadfast-Logo-1536x480.png"
+                    class="footer-logo"
+                    alt="Steadfast Australia"
+                >
+            </a>
+        </footer>
+    </section>
+</main>
+
+<script>
+(function () {
+    "use strict";
+
+    const form = document.getElementById("loginForm");
+    const button = document.getElementById("loginButton");
+    const password = document.getElementById("lp_password");
+    const hasErrors = {{ form.errors|yesno:"true,false" }};
+
+    if (hasErrors && password) {
+        password.value = "";
+        password.focus();
+    }
+
+    if (form && button) {
+        form.addEventListener("submit", function () {
+            button.disabled = true;
+            button.setAttribute("aria-busy", "true");
+            button.querySelector(".button-label").textContent = "Signing in…";
+        });
+    }
+}());
+</script>
+</body>
+</html>

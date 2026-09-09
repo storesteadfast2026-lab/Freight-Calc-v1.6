@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<body style="margin:0;background:#f3f6fa;color:#132238;font-family:Arial,sans-serif;">
+  <div style="max-width:760px;margin:0 auto;padding:24px;">
+    <div style="background:#082a58;color:#fff;padding:18px 22px;border-radius:8px 8px 0 0;">
+      <h1 style="margin:0;font-size:22px;">Freight estimate{% if estimates|length != 1 %}s{% endif %}</h1>
+      <p style="margin:6px 0 0;">{{ client.name }}</p>
+    </div>
+    {% for estimate in estimates %}
+      <div style="background:#fff;padding:22px;border:1px solid #dce5f1;border-top:0;">
+        <h2 style="margin:0 0 14px;color:#082a58;font-size:18px;">{{ estimate.reference }}</h2>
+        <table role="presentation" style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+          <tr><td style="padding:6px 8px;color:#59718e;">Created</td><td style="padding:6px 8px;">{{ estimate.created_at|date:"d M Y H:i" }}</td></tr>
+          <tr><td style="padding:6px 8px;color:#59718e;">Destination</td><td style="padding:6px 8px;">{{ estimate.destination_label }}</td></tr>
+          <tr><td style="padding:6px 8px;color:#59718e;">Total weight</td><td style="padding:6px 8px;">{{ estimate.total_weight_kg|default:"—" }} kg</td></tr>
+          <tr><td style="padding:6px 8px;color:#59718e;">Total cubic</td><td style="padding:6px 8px;">{{ estimate.total_cubic_m3|default:"—" }} m³</td></tr>
+          <tr><td style="padding:6px 8px;color:#59718e;">Best estimate ex GST</td><td style="padding:6px 8px;font-weight:bold;color:#138944;">{% if estimate.best_estimate_ex_gst != None %}${{ estimate.best_estimate_ex_gst }}{% else %}—{% endif %}</td></tr>
+        </table>
+
+        <h3 style="color:#082a58;font-size:15px;">Freight items</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#f2f6fb;"><th style="padding:8px;text-align:left;">SKU</th><th style="padding:8px;text-align:left;">Qty</th><th style="padding:8px;text-align:left;">Type</th><th style="padding:8px;text-align:left;">Dimensions (m)</th><th style="padding:8px;text-align:left;">Weight</th></tr></thead>
+          <tbody>{% for line in estimate.input_snapshot.lines %}<tr><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ line.sku }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ line.quantity }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ line.freight_type }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ line.length_m }} × {{ line.width_m }} × {{ line.height_m }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ line.weight_kg }} kg</td></tr>{% endfor %}</tbody>
+        </table>
+
+        <h3 style="color:#082a58;font-size:15px;">Available freight options</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#f2f6fb;"><th style="padding:8px;text-align:left;">Carrier</th><th style="padding:8px;text-align:left;">Service</th><th style="padding:8px;text-align:left;">Estimate ex GST</th></tr></thead>
+          <tbody>{% for result in estimate.result_snapshot %}<tr><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ result.carrier }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">{{ result.service }}</td><td style="padding:8px;border-bottom:1px solid #dce5f1;">${{ result.estimate_ex_gst }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    {% endfor %}
+    <p style="margin:0;padding:16px 22px;background:#eef3f8;border-radius:0 0 8px 8px;color:#59718e;font-size:12px;">
+      Rates are estimates only and exclude GST. Final pricing may vary due to applicable fuel surcharges and shipment conditions.
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,33 @@
+﻿{
+    "version":  "0720.1446",
+    "applied_at":  "2026-07-21T07:39:44.6749606+09:30",
+    "backup_stamp":  "0721.0739",
+    "backups":  [
+                    {
+                        "target":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\admin.py",
+                        "backup":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\admin.py.0721.0739.bak"
+                    },
+                    {
+                        "target":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\forms.py",
+                        "backup":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\forms.py.0721.0739.bak"
+                    },
+                    {
+                        "target":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\models.py",
+                        "backup":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\models.py.0721.0739.bak"
+                    },
+                    {
+                        "target":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\templates\\admin\\imports\\externaldatafile\\change_list.html",
+                        "backup":  "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\templates\\admin\\imports\\externaldatafile\\change_list.html.0721.0739.bak"
+                    }
+                ],
+    "new_files":  [
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\migrations\\0003_product_stock_reference_sources.py",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\services\\product_source.py",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\services\\stock_source.py",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\services\\xlsx_reader.py",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\apps\\imports\\tests\\test_product_stock_sources.py",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\templates\\admin\\imports\\externaldatafile\\upload_source.html",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\app\\templates\\admin\\imports\\externaldatafile\\reference_validation_summary.html",
+                      "C:\\Docker-Projects\\Freight-Calc-Nuevo\\docs\\patches\\PRODUCT_STOCK_ADMIN_HOTFIX_0720.1446.md"
+                  ]
+}

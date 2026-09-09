@@ -1,0 +1,21 @@
+﻿case_id,total_weight_kg,total_cubic_m3,selected_carrier,selected_service,selected_estimate_ex_gst,measured_postcode_from_excel,validation_status,source,notes
+CASE_001,2196.5,14.43,KTI,GENERAL,634.53,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_002,1035,0.9119999999999999,TEAMEX,ROAD,135.22,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_003,8930,4.351,STEA,ROAD,133.28,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_004,10982.5,28.86,STEA,ROAD,316.84,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_005,1035,0.9119999999999999,STEA,ROAD,376.40,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_006,8930,4.782,STEA,ROAD,257.28,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_007,2196.5,14.43,KTI,GENERAL,671.53,3020,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_008,102.5,0.336,STEA,ROAD,47.60,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_009,312.5,0.576,STEA,ROAD,47.60,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_010,415,0.9119999999999999,STEA,ROAD,76.16,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_011,415,0.9119999999999999,STEA,ROAD,138.16,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_012,2232.5,4.782,STEA,ROAD,47.60,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_013,4465,4.782,STEA,ROAD,76.16,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_014,8930,4.782,STEA,ROAD,133.28,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_015,2196.5,14.43,STEA,ROAD,47.60,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_016,4393,14.43,STEA,ROAD,76.16,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_017,6589.5,14.43,STEA,ROAD,104.72,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_018,8786,14.43,STEA,ROAD,133.28,5084,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_019,1035,0.9119999999999999,KTI,GENERAL,151.22,3020,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.
+CASE_020,1035,0.9119999999999999,KTI,GENERAL,373.21,3020,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.

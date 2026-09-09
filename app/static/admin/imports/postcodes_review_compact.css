@@ -1,0 +1,217 @@
+.inline-group {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.inline-group .tabular {
+    width: 100%;
+    position: relative;
+    overflow-x: auto;
+}
+
+.inline-group .tabular table {
+    width: min(calc(100% - 160px), 1250px);
+    max-width: 1250px;
+    min-width: 980px;
+    margin-left: 160px;
+    margin-right: auto;
+    table-layout: fixed;
+}
+
+.inline-group .tabular::before {
+    content: "Review:";
+    position: absolute;
+    left: 8px;
+    top: 38px;
+    width: 140px;
+    box-sizing: border-box;
+    font-weight: normal;
+    color: var(--body-fg);
+}
+
+.inline-group .tabular td.original,
+.inline-group .tabular th.original {
+    display: none !important;
+}
+
+.inline-group .tabular tbody tr.form-row td {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+    vertical-align: top !important;
+}
+
+.inline-group .tabular thead th {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+}
+
+/*
+Compact normal view, but reserve enough space for a Manual override to be
+fully visible when it is expanded.
+*/
+.inline-group th.column-source_display,
+.inline-group td.field-source_display {
+    width: 20%;
+}
+
+.inline-group th.column-selected_historical_suburb_id,
+.inline-group td.field-selected_historical_suburb_id {
+    width: 27%;
+}
+
+.inline-group th.column-source_action_display,
+.inline-group td.field-source_action_display {
+    width: 9%;
+}
+
+.inline-group th.column-decision,
+.inline-group td.field-decision {
+    width: 14%;
+}
+
+.inline-group th.column-review_controls,
+.inline-group td.field-review_controls {
+    width: 30%;
+}
+
+.postcodes-source-value {
+    display: inline-block;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.postcodes-current-db {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+}
+
+.postcodes-action-badge {
+    display: inline-block;
+    min-width: 68px;
+    padding: 3px 7px;
+    border-radius: 10px;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+    border: 1px solid #b8b8b8;
+    background: #f3f3f3;
+}
+
+.postcodes-action-add {
+    border-color: #79a884;
+    background: #eef7f0;
+}
+
+.postcodes-action-replace {
+    border-color: #c89b55;
+    background: #fff6e8;
+}
+
+.postcodes-action-unchanged {
+    border-color: #9aa0a6;
+    background: #f3f4f5;
+}
+
+.postcodes-action-review {
+    border-color: #b1a66d;
+    background: #fffbe6;
+}
+
+.postcodes-action-already_added {
+    border-color: #6f8f78;
+    background: #eef3ef;
+}
+
+.postcodes-review-decision {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.postcodes-review-controls {
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+}
+
+.postcodes-note-row {
+    width: 100%;
+}
+
+.postcodes-review-note {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+
+.postcodes-manual-override {
+    margin-top: 6px;
+    padding: 7px 8px;
+    border: 1px solid #c8c8c8;
+    border-radius: 4px;
+    background: #fafafa;
+    white-space: normal;
+    overflow: visible;
+}
+
+.postcodes-manual-override[hidden] {
+    display: none !important;
+}
+
+.postcodes-override-title {
+    margin-bottom: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.postcodes-override-grid {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) 58px 78px;
+    gap: 6px;
+    align-items: end;
+    width: 100%;
+}
+
+.postcodes-override-field {
+    display: block;
+    min-width: 0;
+    margin: 0;
+}
+
+.postcodes-override-field > span {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.postcodes-override-field input {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+}
+
+@media (max-width: 1100px) {
+    .inline-group {
+        width: 100%;
+        max-width: 100%;
+        margin-left: 0;
+        margin-right: 0;
+    }
+
+    .inline-group .tabular {
+        overflow-x: auto;
+    }
+
+    .inline-group .tabular table {
+        min-width: 1050px;
+    }
+}

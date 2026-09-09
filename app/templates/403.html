@@ -1,0 +1,31 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Access denied</title>
+    <link rel="stylesheet" href="{% static 'css/login.css' %}">
+</head>
+<body>
+<main class="login-wrapper fade-in-down">
+    <section class="login-card" aria-labelledby="denied-title">
+        <div class="brand-block">
+            <img
+                src="https://steadfast.net.au/wp-content/uploads/2026/03/steadfastfreight-web-logo.jpg"
+                class="logo-main"
+                alt="Steadfast Freight"
+            >
+        </div>
+        <div id="loginForm">
+            <h1 id="denied-title" class="auth-notice">ACCESS DENIED</h1>
+            <div class="login-error" role="alert">
+                You do not have permission to access this page.
+            </div>
+            <a class="login-button" href="{% url 'login' %}">Return to login</a>
+        </div>
+    </section>
+</main>
+</body>
+</html>

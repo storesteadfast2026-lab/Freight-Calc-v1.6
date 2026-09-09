@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.py[cod]
+*.sqlite3
+uploaded_data/*
+!uploaded_data/.gitkeep
+*.zip*.dump
+*.backup
+*.bak
+_patch_backups/
+a.txt
+Freight_Calc_aireview_*.zip
+Freight_Calc_fullbackup_*.zip

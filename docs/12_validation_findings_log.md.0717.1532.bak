@@ -1,0 +1,114 @@
+# Validation Findings Log
+
+This log records calculation mismatches, root causes, corrections, and validation results. It is the operational memory for Excel-to-Django parity.
+
+## 2026-07-14 - TEAMTAS GENERAL fix and validation baseline refresh
+
+### Summary
+
+A random Excel-vs-Django validation battery detected a real calculation issue for `TEAMTAS GENERAL`.
+
+Failing case:
+
+```text
+Case: RANDOM_004
+Destination: WEEGENA TAS 7304
+Product: BRH4443 x 2
+Excel expected: 828.03
+Django actual before fix: 663983.07
+```
+
+### Root cause
+
+Django treated `TEAMTAS GENERAL` as a normal kg-based carrier. That effectively calculated:
+
+```text
+rate * kilograms
+```
+
+Excel does not calculate `TEAMTAS GENERAL` that way. The workbook uses carrier-specific logic in `BrokerTotals` row 20 based on whole tonne/cubic chargeable units and an additional TEAMTAS fee.
+
+### Resolution
+
+`calculator.py` was updated with TEAMTAS-specific logic:
+
+- chargeable units are based on the greater of rating cubic units and actual tonnes
+- chargeable units are rounded up to whole units
+- base freight uses `Basic * rating_units + subsequent + Rate * whole_chargeable_units`
+- an additional TEAMTAS fee is added:
+
+```text
+(pallet_count * 2) + (visible_cubic * 0.6)
+```
+
+### Important baseline finding
+
+After the TEAMTAS fix, `random_current` passed, but `live_latest` initially showed many failures.
+
+This was not a Django calculation regression. The cause was that the existing `live_latest` expected CSV files were not aligned with the current base workbook/baseline.
+
+Rule confirmed:
+
+```text
+Each validation battery must use the Excel baseline that generated its expected CSV files.
+```
+
+Do not mix:
+
+- expected CSV from one baseline
+- PostgreSQL data imported from another baseline
+
+Doing so can produce false failures even when Django calculation logic is correct.
+
+### Final validation results
+
+Real 20-case battery:
+
+```text
+Cases run: 20
+Expected output rows loaded: 77
+Report rows: 97
+OK rows: 97
+FAIL rows: 0
+```
+
+Random 15-case battery:
+
+```text
+Cases run: 15
+Expected output rows loaded: 21
+Report rows: 36
+OK rows: 36
+FAIL rows: 0
+```
+
+### Current status
+
+```text
+TEAMTAS GENERAL: fixed
+live_latest: passing
+random_current: passing
+Excel-Django validation workflow: healthy
+```
+
+## Earlier confirmed findings
+
+### Visible cubic vs rating cubic
+
+`Calculator!J24` is the visible/customer cubic. `CalcLines!P29` can include pallet cubic and is used internally for rating.
+
+Django consolidation includes pallet cubic, so visual comparison may need:
+
+```text
+visible_cubic = rating_cubic - pallet_count * 0.02
+```
+
+### Zone resolution order
+
+Excel behavior requires exact `suburb + state` match before postcode-only fallback. Many Australian suburbs share postcodes.
+
+TEAMEX must not freely fall back to postcode-only aliases when Excel does not rate the carrier that way.
+
+### KTI precision
+
+KTI required higher decimal precision in imported rates. `FreightRate` decimal precision was increased to preserve six decimal places.

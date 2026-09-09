@@ -1,0 +1,29 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <div id="content-main">
+    <p>Edit the fuel source URL when its location changes. The last URL that validates successfully is remembered separately for each client.</p>
+    <p>The file will be stored, audited and validated. Fuel rates are not changed until you activate the validated file.</p>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div class="submit-row">
+        <input type="submit" value="Fetch and validate" class="default">
+        <a href="{% url 'admin:imports_externaldatafile_changelist' %}" class="button cancel-link">Cancel</a>
+      </div>
+    </form>
+    {{ source_urls_by_client|json_script:"fuel-source-urls" }}
+    <script>
+      (() => {
+        const clientField = document.getElementById('id_client');
+        const sourceField = document.getElementById('id_source_url');
+        const sourceMapElement = document.getElementById('fuel-source-urls');
+        if (!clientField || !sourceField || !sourceMapElement) return;
+        const sourceUrls = JSON.parse(sourceMapElement.textContent);
+        clientField.addEventListener('change', () => {
+          sourceField.value = sourceUrls[clientField.value] || sourceField.value;
+        });
+      })();
+    </script>
+  </div>
+{% endblock %}

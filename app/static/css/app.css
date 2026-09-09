@@ -1,0 +1,596 @@
+body{font-family:system-ui,Arial,sans-serif;background:#f5f7fb;margin:0;color:#18202a}.page{max-width:1180px;margin:auto;padding:18px}.card{background:white;border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:0 4px 18px #0001}h1,h2{margin-top:0}.calculator-header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:10px}.calculator-header h1{font-size:28px;margin:0}.muted{color:#667085;margin:0}.grid{display:grid;gap:10px}label{display:grid;gap:5px;font-weight:600;font-size:14px}input,select,button{padding:8px 10px;border:1px solid #d0d5dd;border-radius:8px;font-size:14px;box-sizing:border-box}button{cursor:pointer;background:#fff}.primary{background:#155eef;color:white;border-color:#155eef;margin-left:8px}table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border-bottom:1px solid #eaecf0;padding:6px;text-align:left}th{background:#f8fafc}.dropdown{position:absolute;background:white;border:1px solid #d0d5dd;border-radius:8px;max-height:260px;overflow:auto;z-index:1000;min-width:260px;box-shadow:0 10px 24px #0002}.dropdown:empty{display:none}.dropdown button{display:block;width:100%;border:0;text-align:left;border-radius:0;background:#fff;padding:9px 11px}.dropdown button:hover{background:#f2f4f7}.best{background:#e7f8ee;font-weight:700}.error{color:#b42318;margin:8px 0}
+
+/* Compact calculator header fields so the form uses less vertical and horizontal space. */
+.calculator-card{padding:14px 16px}.calculator-grid{grid-template-columns:1.4fr 1.5fr .7fr .7fr .75fr 1fr;align-items:end}.calculator-grid input,.calculator-grid select{height:38px}.calculator-grid label:nth-child(1),.calculator-grid label:nth-child(2){min-width:180px}.calculator-grid label:nth-child(3),.calculator-grid label:nth-child(4),.calculator-grid label:nth-child(5),.calculator-grid label:nth-child(6){min-width:110px}
+
+/* Keep the autocomplete dropdown anchored to the input container without changing layout size. */
+label{position:relative}.dropdown{left:0;right:auto;top:100%;box-sizing:border-box}.dropdown .no-results{display:block;padding:10px;color:#667085;background:#fff}
+
+/* The Products section is intentionally compact. The visible column header already identifies product entry, so the repeated section title was removed. */
+.products-card{overflow:visible;padding-top:14px}.products-table-wrap{width:100%;max-width:100%;overflow:visible;padding-bottom:4px}.products-table{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse}.products-table th,.products-table td{vertical-align:top;padding:6px 7px}.products-table input{width:100%;box-sizing:border-box;padding:7px 8px;height:36px}.products-table .col-product{width:260px}.products-table .col-qty{width:70px}.products-table .col-type{width:62px}.products-table .col-num{width:82px}.products-table .col-action{width:78px}.products-table td{position:relative;overflow:visible}.products-table .dropdown{min-width:360px;max-width:520px;max-height:300px;white-space:normal}.products-table .qty,.products-table .ftype,.products-table .len,.products-table .wid,.products-table .hei,.products-table .weight,.products-table .cubic{text-align:right}.products-card button{padding:8px 12px}
+
+@media(max-width:980px){.calculator-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.products-table-wrap{overflow-x:auto;overflow-y:visible;border:1px solid #eaecf0;border-radius:10px}.products-table{min-width:830px}.products-table input{max-width:none}}
+@media(max-width:760px){.page{padding:12px}.calculator-header h1{font-size:24px}.calculator-grid{grid-template-columns:1fr}table{font-size:12px}}
+
+/* Visual feedback for Calculate Freight and empty results. */
+.status{color:#344054;margin:8px 0;font-size:14px}.empty-result{color:#667085;text-align:center;padding:12px}.primary:disabled{opacity:.65;cursor:wait}
+
+/* Show product dimensions in compact two-decimal fields. */
+.products-table .decimal{font-variant-numeric:tabular-nums}
+
+
+/* Compact the top calculator fields and add spacing so State, Postcode and Tailgate do not overlap. */
+.calculator-grid{display:grid;grid-template-columns:minmax(185px,1.15fr) minmax(215px,1.3fr) minmax(72px,.42fr) minmax(90px,.48fr) minmax(100px,.54fr) minmax(150px,.78fr) minmax(145px,.74fr);column-gap:14px;row-gap:10px;align-items:end}
+.calculator-grid label{min-width:0!important}
+.calculator-grid input,.calculator-grid select{width:100%;height:36px;padding:7px 10px}
+
+/* Searchable select-style field with a dropdown tab for suburbs and products. */
+.combo-field{position:relative;display:flex;align-items:stretch;width:100%}
+.combo-field input{padding-right:34px;width:100%}
+.combo-toggle{position:absolute;right:2px;top:2px;bottom:2px;width:30px;padding:0;border:0;border-left:1px solid #e4e7ec;border-radius:0 7px 7px 0;background:#fff;color:#111827;font-size:18px;line-height:1;cursor:pointer}
+.combo-toggle:hover{background:#f8fafc}
+.combo-field .dropdown{top:calc(100% + 4px);left:0;right:auto;width:100%;min-width:100%;max-width:min(520px,90vw)}
+.product-combo .dropdown{width:420px;min-width:100%;max-width:min(560px,90vw)}
+
+/* Keep product inputs compact while allowing the product dropdown to remain readable. */
+.products-table .combo-field input{height:36px}
+.products-table .combo-toggle{width:28px;font-size:17px}
+.products-table .col-product{width:280px}
+.products-table .col-qty{width:68px}
+.products-table .col-type{width:58px}
+.products-table .col-num{width:82px}
+.products-table .col-action{width:82px}
+
+@media(max-width:1180px){.calculator-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.calculator-grid{grid-template-columns:1fr}.combo-field .dropdown,.product-combo .dropdown{width:100%;max-width:100%}}
+
+.pricing-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #475467;
+  background: #f8fafc;
+  border-left: 4px solid #98a2b3;
+  border-radius: 8px;
+}
+/* User access Version 1 */
+.user-access-card{padding:12px 16px}
+.user-access-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.user-access-summary>div:first-child{display:flex;flex-direction:column;gap:2px}
+.user-access-actions{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.user-access-actions form{margin:0}
+.user-access-actions label{margin:0;min-width:220px}
+.client-badge{display:inline-flex;align-items:center;min-height:36px;padding:7px 12px;border:1px solid #d0d5dd;border-radius:8px;background:#f8fafc}
+.login-page{max-width:520px;margin:0 auto}
+.login-card form{display:grid;gap:14px}
+.login-card button{justify-self:start}
+
+/* Freight Calculator visual refresh — presentation only.
+   All selectors are scoped so the login and Django Admin remain unchanged. */
+.visually-hidden{
+  position:absolute!important;
+  width:1px!important;
+  height:1px!important;
+  padding:0!important;
+  margin:-1px!important;
+  overflow:hidden!important;
+  clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;
+  border:0!important;
+}
+
+.calculator-page{
+  min-width:320px;
+  background:#f8fafc;
+  color:#0b2349;
+}
+
+.calculator-page .fc-header{
+  background:linear-gradient(100deg,#062753 0%,#031b3b 100%);
+  color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.08);
+}
+
+.calculator-page .fc-header-inner{
+  max-width:1500px;
+  min-height:68px;
+  margin:0 auto;
+  padding:0 34px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:24px;
+}
+
+.calculator-page .fc-brand,
+.calculator-page .fc-account,
+.calculator-page .fc-user,
+.calculator-page .fc-user>span:last-child{
+  display:flex;
+  align-items:center;
+}
+
+.calculator-page .fc-brand{gap:20px}
+.calculator-page .fc-brand strong{font-size:25px;letter-spacing:-.02em}
+.calculator-page .fc-brand span{font-size:14px;color:#d7e0ef}
+.calculator-page .fc-account{gap:16px}
+.calculator-page .fc-account form{margin:0}
+.calculator-page .fc-user{gap:9px;padding-right:16px;border-right:1px solid rgba(255,255,255,.38)}
+.calculator-page .fc-user>span:last-child{align-items:flex-start;flex-direction:column;line-height:1.2}
+.calculator-page .fc-user strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+.calculator-page .fc-user small{margin-top:3px;color:#c8d4e6;font-size:11px}
+.calculator-page .fc-user-icon{font-size:11px;color:#fff}
+
+.calculator-page .fc-client-badge,
+.calculator-page .fc-client-select select,
+.calculator-page .fc-signout{
+  min-height:38px;
+  border:1px solid rgba(255,255,255,.38);
+  border-radius:7px;
+  background:rgba(255,255,255,.04);
+  color:#fff;
+}
+
+.calculator-page .fc-client-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:7px 14px;
+  font-size:13px;
+  font-weight:700;
+}
+
+.calculator-page .fc-client-select{display:block;min-width:185px}
+.calculator-page .fc-client-select select{
+  width:100%;
+  padding:7px 34px 7px 12px;
+  color-scheme:dark;
+}
+.calculator-page .fc-signout{padding:8px 16px}
+.calculator-page .fc-signout:hover{background:rgba(255,255,255,.12)}
+
+.calculator-page .fc-page{
+  max-width:1500px;
+  margin:0 auto;
+  padding:24px;
+}
+
+.calculator-page .fc-workspace{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 365px;
+  grid-template-areas:
+    "route summary"
+    "shipment summary"
+    "results summary";
+  gap:14px 18px;
+  align-items:start;
+}
+
+.calculator-page .fc-main-column{display:contents}
+.calculator-page .route-card{grid-area:route}
+.calculator-page .shipment-card{grid-area:shipment}
+.calculator-page .results-card{grid-area:results}
+.calculator-page .shipment-summary{grid-area:summary}
+
+.calculator-page .card{
+  margin:0;
+  padding:17px;
+  border:1px solid #dce3ec;
+  border-radius:11px;
+  background:#fff;
+  box-shadow:0 2px 8px rgba(15,35,65,.025);
+}
+
+.calculator-page h1,
+.calculator-page h2{
+  margin:0;
+  color:#0a234a;
+  letter-spacing:-.02em;
+}
+.calculator-page h1{font-size:21px}
+.calculator-page h2{font-size:20px}
+
+.calculator-page label{
+  min-width:0;
+  color:#0b2349;
+  font-size:13px;
+  font-weight:650;
+}
+
+.calculator-page .field-label{display:flex;align-items:center;gap:6px;min-height:18px}
+.calculator-page .field-help{
+  display:inline-grid;
+  place-items:center;
+  width:14px;
+  height:14px;
+  border:1px solid #94a3b8;
+  border-radius:50%;
+  color:#64748b;
+  font-size:9px;
+  font-weight:800;
+  cursor:help;
+}
+
+.calculator-page input,
+.calculator-page select,
+.calculator-page button{
+  border-color:#ccd6e3;
+  color:#0b2349;
+}
+.calculator-page input:focus,
+.calculator-page select:focus,
+.calculator-page button:focus-visible{
+  outline:3px solid rgba(213,151,0,.22);
+  outline-offset:1px;
+  border-color:#d59700;
+}
+.calculator-page input[readonly]{background:#fbfcfe}
+
+.calculator-page .route-card{overflow:visible;padding:18px}
+.calculator-page .route-card h1{margin:0 0 16px 4px}
+.calculator-page .route-primary-grid{
+  display:grid;
+  grid-template-columns:minmax(310px,1.35fr) minmax(80px,.35fr) minmax(340px,1.2fr);
+  gap:12px;
+  align-items:end;
+}
+
+.calculator-page .route-field{
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  gap:12px;
+  align-items:end;
+}
+.calculator-page .route-marker{
+  display:grid;
+  place-items:center;
+  width:48px;
+  height:48px;
+  border-radius:10px;
+  background:#f3f5f8;
+}
+.calculator-page .route-marker-to{background:#fff5db}
+.calculator-page .route-marker svg{width:25px;height:25px;fill:#0b2b57}
+.calculator-page .route-marker-to svg{fill:#d39400}
+.calculator-page .route-primary-grid input,
+.calculator-page .route-primary-grid select,
+.calculator-page .route-options-grid input,
+.calculator-page .route-options-grid select{width:100%;height:42px}
+
+.calculator-page .route-connector{
+  align-self:end;
+  height:42px;
+  display:flex;
+  align-items:center;
+  padding:0 2px;
+}
+.calculator-page .route-connector span{
+  position:relative;
+  width:100%;
+  border-top:2px dotted #d59a09;
+}
+.calculator-page .route-connector span::before,
+.calculator-page .route-connector span::after{
+  content:"";
+  position:absolute;
+  top:-5px;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#d59a09;
+}
+.calculator-page .route-connector span::before{left:-1px}
+.calculator-page .route-connector span::after{right:-1px}
+
+.calculator-page .route-options-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  margin-top:15px;
+  border:1px solid #dce3ec;
+  border-radius:8px;
+  overflow:hidden;
+}
+.calculator-page .route-options-grid label{padding:12px 16px}
+.calculator-page .route-options-grid label+label{border-left:1px solid #dce3ec}
+
+.calculator-page .section-heading{
+  display:flex;
+  align-items:baseline;
+  gap:10px;
+  margin:0 0 12px;
+}
+.calculator-page .section-heading p{
+  margin:0;
+  color:#63728a;
+  font-size:12px;
+}
+
+.calculator-page .products-card{overflow:visible;padding:17px}
+.calculator-page .products-table-wrap{
+  border:1px solid #dce3ec;
+  border-radius:8px;
+  overflow:visible;
+  padding:0;
+}
+.calculator-page .products-table{
+  margin:0;
+  table-layout:fixed;
+}
+.calculator-page .products-table th{
+  height:40px;
+  padding:8px 10px;
+  border-bottom:1px solid #dce3ec;
+  background:#f5f8fc;
+  color:#193154;
+  font-size:11px;
+  font-weight:650;
+}
+.calculator-page .products-table td{
+  padding:5px 8px;
+  border-bottom:1px solid #e7ecf2;
+}
+.calculator-page .products-table tbody tr:last-child td{border-bottom:0}
+.calculator-page .products-table input{height:34px;border-radius:6px;font-size:13px}
+.calculator-page .products-table .col-product{width:190px}
+.calculator-page .products-table .col-qty{width:58px}
+.calculator-page .products-table .col-type{width:58px}
+.calculator-page .products-table .col-num{width:86px}
+.calculator-page .products-table .col-action{width:66px;text-align:center}
+.calculator-page .products-table td:last-child{text-align:center}
+
+.calculator-page .remove-line{
+  width:34px;
+  height:34px;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  background:#fff;
+  border-radius:6px;
+  color:#0b2b57;
+}
+.calculator-page .remove-line .trash-icon{
+  width:18px;
+  height:18px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.9;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.calculator-page .remove-line:hover{border-color:#b42318;background:#fff5f4;color:#b42318}
+.calculator-page .add-line-button{
+  margin-top:11px;
+  padding:8px 13px;
+  border-color:#d99a00;
+  color:#172b4d;
+  font-weight:650;
+}
+.calculator-page .add-line-button span{color:#d99a00;font-size:18px}
+.calculator-page .add-line-button:hover{background:#fff8e7}
+
+.calculator-page .shipment-summary{
+  position:sticky;
+  top:18px;
+  padding:24px;
+}
+.calculator-page .shipment-summary h2{margin-bottom:10px}
+.calculator-page .summary-row{
+  min-height:86px;
+  display:grid;
+  grid-template-columns:58px minmax(0,1fr);
+  align-items:center;
+  gap:15px;
+  border-bottom:1px solid #e2e8f0;
+}
+.calculator-page .summary-row>span:last-child,
+.calculator-page .summary-row label{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:5px;
+}
+.calculator-page .summary-row strong,
+.calculator-page .summary-row label>span:first-child{font-size:13px}
+.calculator-page .summary-row output{font-size:18px;color:#0a234a}
+.calculator-page .summary-icon{
+  display:grid;
+  place-items:center;
+  width:56px;
+  height:56px;
+  border-radius:50%;
+  background:#f1f5fb;
+}
+.calculator-page .summary-icon svg{width:28px;height:28px;fill:#0b2b57}
+.calculator-page .summary-value-wrap{
+  display:flex;
+  align-items:baseline;
+  gap:6px;
+  color:#0a234a;
+  font-size:18px;
+  font-weight:500;
+}
+.calculator-page .summary-value{
+  width:125px;
+  height:auto;
+  padding:0;
+  border:0;
+  background:transparent!important;
+  color:#0a234a;
+  font-size:18px;
+  font-weight:500;
+  text-align:left;
+}
+.calculator-page .summary-value:focus{outline:0}
+.calculator-page .calculate-button{
+  width:100%;
+  min-height:52px;
+  margin:28px 0 18px;
+  border-color:#d59600;
+  border-radius:6px;
+  background:linear-gradient(110deg,#d49300,#efa900);
+  color:#fff;
+  font-size:17px;
+  font-weight:750;
+  box-shadow:0 5px 14px rgba(202,139,0,.18);
+}
+.calculator-page .calculate-button:hover{filter:brightness(.97)}
+.calculator-page .calculate-button:disabled{opacity:.62;cursor:wait}
+.calculator-page .summary-notice,
+.calculator-page .results-note{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:13px;
+  border-radius:8px;
+  background:#f3f7fd;
+  color:#294365;
+  font-size:12px;
+  line-height:1.45;
+}
+.calculator-page .info-icon{
+  flex:0 0 auto;
+  display:grid;
+  place-items:center;
+  width:20px;
+  height:20px;
+  border-radius:50%;
+  background:#1474c4;
+  color:#fff;
+  font-size:12px;
+  font-weight:800;
+}
+
+.calculator-page .results-card{padding:15px}
+.calculator-page .results-heading{margin-bottom:2px}
+.calculator-page .status{min-height:0;margin:2px 0 6px;color:#63728a;font-size:12px}
+.calculator-page .status:empty,
+.calculator-page .error:empty{display:none}
+.calculator-page .error{
+  margin:8px 0;
+  padding:10px 12px;
+  border-radius:7px;
+  background:#fff1f0;
+}
+.calculator-page .results-table{
+  margin:0;
+  border-collapse:separate;
+  border-spacing:0 10px;
+}
+.calculator-page .results-table td{
+  height:53px;
+  padding:5px 16px;
+  border-top:1px solid #dce3ec;
+  border-bottom:1px solid #dce3ec;
+  background:#fff;
+  text-align:center;
+  color:#0a234a;
+}
+.calculator-page .results-table td:first-child{
+  position:relative;
+  width:40%;
+  border-left:1px solid #dce3ec;
+  border-radius:8px 0 0 8px;
+  font-size:20px;
+  font-weight:750;
+}
+.calculator-page .results-table td:nth-child(2){width:26%;font-size:15px}
+.calculator-page .results-table td:last-child{
+  width:34%;
+  border-right:1px solid #dce3ec;
+  border-radius:0 8px 8px 0;
+  font-size:20px;
+  font-weight:800;
+}
+.calculator-page .results-table td:last-child::after{
+  content:"ex GST";
+  display:block;
+  margin-top:1px;
+  font-size:10px;
+  font-weight:500;
+}
+.calculator-page .results-table tr.best td{
+  border-color:#14914d;
+  background:#fbfffc;
+}
+.calculator-page .results-table tr.best td:last-child{color:#138944}
+.calculator-page .results-table tr.best td:first-child::before{
+  content:"Best price";
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+  padding:4px 8px;
+  border-radius:5px;
+  background:#128446;
+  color:#fff;
+  font-size:10px;
+  font-weight:750;
+}
+.calculator-page .empty-result{
+  height:auto!important;
+  padding:18px!important;
+  border:1px solid #dce3ec!important;
+  border-radius:8px!important;
+  color:#63728a!important;
+  font-size:13px!important;
+  font-weight:500!important;
+}
+.calculator-page .results-note{margin-top:1px}
+.calculator-page .results-note p{margin:0}
+
+@media(max-width:1250px){
+  .calculator-page .fc-workspace{grid-template-columns:minmax(0,1fr) 320px}
+  .calculator-page .route-primary-grid{
+    grid-template-columns:minmax(280px,1.15fr) 65px minmax(300px,1fr);
+  }
+  .calculator-page .products-table-wrap{overflow-x:auto;overflow-y:visible}
+  .calculator-page .products-table{min-width:860px}
+}
+
+@media(max-width:1000px){
+  .calculator-page .fc-header-inner{padding:12px 22px;align-items:flex-start}
+  .calculator-page .fc-brand{flex-direction:column;align-items:flex-start;gap:2px}
+  .calculator-page .fc-account{justify-content:flex-end;flex-wrap:wrap}
+  .calculator-page .fc-user{display:none}
+  .calculator-page .fc-workspace{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "route"
+      "shipment"
+      "summary"
+      "results";
+  }
+  .calculator-page .shipment-summary{position:static}
+  .calculator-page .route-primary-grid{
+    grid-template-columns:minmax(260px,1fr) 70px minmax(280px,1fr);
+  }
+}
+
+@media(max-width:760px){
+  .calculator-page .fc-header-inner{padding:12px 16px;flex-direction:column}
+  .calculator-page .fc-account{width:100%;justify-content:flex-start}
+  .calculator-page .fc-client-badge{max-width:calc(100% - 100px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .calculator-page .fc-page{padding:12px}
+  .calculator-page .card{padding:14px}
+  .calculator-page .route-primary-grid{grid-template-columns:1fr}
+  .calculator-page .route-field{grid-template-columns:42px minmax(0,1fr)}
+  .calculator-page .route-marker{width:42px;height:42px}
+  .calculator-page .route-connector{display:none}
+  .calculator-page .route-options-grid{grid-template-columns:1fr}
+  .calculator-page .route-options-grid label+label{border-left:0;border-top:1px solid #dce3ec}
+  .calculator-page .section-heading{display:block}
+  .calculator-page .section-heading p{margin-top:4px}
+  .calculator-page .shipment-summary{padding:18px}
+  .calculator-page .results-table td{padding:5px 8px}
+  .calculator-page .results-table td:first-child{font-size:15px}
+  .calculator-page .results-table td:nth-child(2){font-size:12px}
+  .calculator-page .results-table td:last-child{font-size:16px}
+  .calculator-page .results-table tr.best td:first-child{padding-top:24px}
+  .calculator-page .results-table tr.best td:first-child::before{
+    left:50%;
+    top:7px;
+    transform:translateX(-50%);
+  }
+}

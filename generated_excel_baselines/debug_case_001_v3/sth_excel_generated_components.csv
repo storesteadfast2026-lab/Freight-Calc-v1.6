@@ -1,0 +1,2 @@
+﻿case_id,total_weight_kg,total_cubic_m3,selected_carrier,selected_service,selected_estimate_ex_gst,measured_postcode_from_excel,validation_status,source,notes
+CASE_001,2196.5,14.43,KTI,GENERAL,647.17,3023,generated_from_excel_live,Microsoft Excel automation,Totals read from configured Calculator cells.

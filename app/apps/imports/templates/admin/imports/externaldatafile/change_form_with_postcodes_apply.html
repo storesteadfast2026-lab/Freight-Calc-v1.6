@@ -1,0 +1,58 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+{% if original and original.file_type == "SUBURBS" %}
+  {% if not postcodes_review_completed %}
+    <li>
+      <a href="{% url 'admin:imports_externaldatafile_postcodes_apply' original.pk %}">
+        Apply approved changes
+      </a>
+    </li>
+  {% endif %}
+  <li>
+    <a href="{% url 'admin:imports_externaldatafile_postcodes_rollback' original.pk %}">
+      Rollback last apply
+    </a>
+  </li>
+{% endif %}
+{{ block.super }}
+{% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+{% if original and original.file_type == "SUBURBS" and postcodes_review_completed %}
+<fieldset class="module aligned">
+  <h2>POSTCODES REVIEW - POSTCODES.CSV IS AUTHORITATIVE</h2>
+  <div class="form-row">
+    <div>
+      <div class="flex-container">
+        <label>Review:</label>
+        <div class="readonly">
+          <strong>Completed.</strong>
+          All {{ postcodes_review_completion.approved_count }} approved changes
+          have been applied. No action required.
+          {% if postcodes_review_completion.batch_id %}
+            Batch {{ postcodes_review_completion.batch_id }}.
+          {% endif %}
+          <a href="{% url 'admin:audit_auditevent_changelist' %}">
+            View Audit Events
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</fieldset>
+{% endif %}
+{% endblock %}
+
+{% block submit_buttons_bottom %}
+{% if original and original.file_type == "SUBURBS" and not postcodes_review_completed %}
+<div style="margin:8px 0;padding:8px 10px;background:#f6f6f6;border-left:4px solid #417690;">
+  <strong>Save = Review only.</strong>
+  Saving this page stores Review decisions. It does not change operational
+  postcode data. Use <strong>Apply approved changes</strong> for protected
+  database changes.
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}

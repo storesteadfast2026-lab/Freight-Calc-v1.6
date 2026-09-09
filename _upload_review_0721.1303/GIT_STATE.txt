@@ -1,0 +1,133 @@
+﻿# Git state
+Generated: 2026-07-21 13:04:00 +09:30
+Branch: test1
+Commit: be82da422d330b798b89fa851e40599830a833a3
+Last commit: be82da4 | 2026-07-20T14:16:08+09:30 | Fabian | Se incporpora la IP local del PC en .env y ademas dos archivos importados
+
+Modified/untracked files:
+ M _upload_review/.env.example
+ M _upload_review/README.md
+ M _upload_review/app/apps/audit/admin.py
+ M _upload_review/app/apps/audit/models.py
+ M _upload_review/app/apps/carriers/admin.py
+ M _upload_review/app/apps/carriers/models.py
+ M _upload_review/app/apps/freight/fixtures/random_current/sth_excel_random_cases.csv
+ D _upload_review/app/apps/freight/fixtures/random_current/sth_excel_random_components.csv
+ D _upload_review/app/apps/freight/fixtures/random_current/sth_excel_random_outputs.csv
+ M _upload_review/app/apps/freight/management/commands/validate_excel_battery.py
+ M _upload_review/app/apps/imports/admin.py
+ M _upload_review/app/apps/imports/management/commands/import_sth_excel.py
+ M _upload_review/app/apps/imports/models.py
+ M _upload_review/app/config/settings/base.py
+ M _upload_review/app/config/urls.py
+ M _upload_review/docker-compose.yml
+ M _upload_review/docs/02_calculation_flow.md
+ M _upload_review/docs/03_data_model.md
+ M _upload_review/docs/04_imports.md
+ M _upload_review/docs/09_troubleshooting.md
+ M _upload_review/docs/11_validation_runbook.md
+ M _upload_review/docs/12_validation_findings_log.md
+ D _upload_review/reports/random_current/sth_excel_random_comparison_report.csv
+ M app/apps/freight/fixtures/random_current/sth_excel_random_cases.csv
+ D app/apps/freight/fixtures/random_current/sth_excel_random_components.csv
+ D app/apps/freight/fixtures/random_current/sth_excel_random_outputs.csv
+ M app/apps/imports/admin.py
+ M app/apps/imports/forms.py
+ M app/apps/imports/models.py
+ M app/config/urls.py
+ M app/templates/admin/imports/externaldatafile/change_list.html
+ D create_sth_review_zip.ps1
+ D generated_excel_baselines/random_current/STH_LIVE_BASELINE_20260715_151912.xlsx
+ D generated_excel_baselines/random_current/STH_LIVE_BASELINE_20260717_140800.xlsx
+ D generated_excel_baselines/random_current/manifest.json
+ D generated_excel_baselines/random_current/sth_excel_generated_cases.csv
+ D generated_excel_baselines/random_current/sth_excel_generated_components.csv
+ D generated_excel_baselines/random_current/sth_excel_generated_outputs.csv
+ D generated_excel_baselines/random_current/sth_excel_generation_debug.csv
+ D reports/random_current/sth_excel_random_comparison_report.csv
+ D sample_data/live_baselines/random_current/STH_LIVE_BASELINE_20260715_151912.xlsx
+ D sample_data/live_baselines/random_current/STH_LIVE_BASELINE_20260717_140800.xlsx
+ D sth_current_code_review.zip
+?? .patch_state/
+?? Create_Files_Review.zip
+?? Create_Files_Review_zip.ps1
+?? Create_Files_Review_zip_2.ps1
+?? _upload_review/app/apps/__init__.py
+?? _upload_review/app/apps/audit/admin.py.0717.1532.bak
+?? _upload_review/app/apps/audit/admin.py.0717.1542.bak
+?? _upload_review/app/apps/audit/migrations/0002_fuel_audit_fields.py
+?? _upload_review/app/apps/audit/migrations/0002_fuel_audit_fields.py.0717.1542.bak
+?? _upload_review/app/apps/audit/models.py.0717.1532.bak
+?? _upload_review/app/apps/audit/models.py.0717.1542.bak
+?? _upload_review/app/apps/carriers/admin.py.0717.1532.bak
+?? _upload_review/app/apps/carriers/admin.py.0717.1542.bak
+?? _upload_review/app/apps/carriers/migrations/0003_fuel_provenance.py
+?? _upload_review/app/apps/carriers/migrations/0003_fuel_provenance.py.0717.1542.bak
+?? _upload_review/app/apps/carriers/models.py.0717.1532.bak
+?? _upload_review/app/apps/carriers/models.py.0717.1542.bak
+?? _upload_review/app/apps/freight/management/commands/validate_excel_battery.py.0717.1532.bak
+?? _upload_review/app/apps/freight/management/commands/validate_excel_battery.py.0717.1542.bak
+?? _upload_review/app/apps/imports/admin.py.0717.1532.bak
+?? _upload_review/app/apps/imports/admin.py.0717.1542.bak
+?? _upload_review/app/apps/imports/admin.py.0717.2225.bak
+?? _upload_review/app/apps/imports/admin.py.0717.2240.bak
+?? _upload_review/app/apps/imports/admin.py.0721.0739.bak
+?? _upload_review/app/apps/imports/forms.py
+?? _upload_review/app/apps/imports/forms.py.0717.1542.bak
+?? _upload_review/app/apps/imports/forms.py.0721.0739.bak
+?? _upload_review/app/apps/imports/management/commands/import_sth_excel.py.0717.1532.bak
+?? _upload_review/app/apps/imports/management/commands/import_sth_excel.py.0717.1542.bak
+?? _upload_review/app/apps/imports/management/commands/reapply_active_fuel.py
+?? _upload_review/app/apps/imports/management/commands/reapply_active_fuel.py.0717.1542.bak
+?? _upload_review/app/apps/imports/migrations/0002_fuel_admin_import.py
+?? _upload_review/app/apps/imports/migrations/0002_fuel_admin_import.py.0717.1542.bak
+?? _upload_review/app/apps/imports/migrations/0003_product_stock_reference_sources.py
+?? _upload_review/app/apps/imports/models.py.0717.1532.bak
+?? _upload_review/app/apps/imports/models.py.0717.1542.bak
+?? _upload_review/app/apps/imports/models.py.0721.0739.bak
+?? _upload_review/app/apps/imports/services/
+?? _upload_review/app/apps/imports/tests/
+?? _upload_review/app/config/settings/base.py.0717.1532.bak
+?? _upload_review/app/config/settings/base.py.0717.1542.bak
+?? _upload_review/app/config/settings/test.py
+?? _upload_review/app/config/settings/test.py.0717.1542.bak
+?? _upload_review/app/templates/admin/
+?? _upload_review/docs/02_calculation_flow.md.0717.1532.bak
+?? _upload_review/docs/02_calculation_flow.md.0717.1542.bak
+?? _upload_review/docs/03_data_model.md.0717.1532.bak
+?? _upload_review/docs/03_data_model.md.0717.1542.bak
+?? _upload_review/docs/04_imports.md.0717.1532.bak
+?? _upload_review/docs/04_imports.md.0717.1542.bak
+?? _upload_review/docs/04_imports.md.0717.2225.bak
+?? _upload_review/docs/04_imports.md.0717.2240.bak
+?? _upload_review/docs/09_troubleshooting.md.0717.1532.bak
+?? _upload_review/docs/09_troubleshooting.md.0717.1542.bak
+?? _upload_review/docs/09_troubleshooting.md.0717.1558.bak
+?? _upload_review/docs/11_validation_runbook.md.0717.1532.bak
+?? _upload_review/docs/11_validation_runbook.md.0717.1542.bak
+?? _upload_review/docs/12_validation_findings_log.md.0717.1532.bak
+?? _upload_review/docs/12_validation_findings_log.md.0717.1542.bak
+?? _upload_review/docs/12_validation_findings_log.md.0717.1558.bak
+?? _upload_review/docs/12_validation_findings_log.md.0717.2225.bak
+?? _upload_review/docs/12_validation_findings_log.md.0717.2240.bak
+?? _upload_review/docs/14_excel_django_traceability_matrix.md
+?? _upload_review/docs/14_excel_django_traceability_matrix.md.0717.1542.bak
+?? _upload_review/docs/15_admin_configuration_dictionary.md
+?? _upload_review/docs/15_admin_configuration_dictionary.md.0717.1542.bak
+?? _upload_review/docs/adr/0004_admin_fuel_import.md
+?? _upload_review/docs/adr/0004_admin_fuel_import.md.0717.1542.bak
+?? _upload_review/docs/patches/
+?? _upload_review_0721.1303/
+?? app/apps/__init__.py
+?? app/apps/imports/admin.py.0721.0739.bak
+?? app/apps/imports/forms.py.0721.0739.bak
+?? app/apps/imports/migrations/0003_product_stock_reference_sources.py
+?? app/apps/imports/models.py.0721.0739.bak
+?? app/apps/imports/services/product_source.py
+?? app/apps/imports/services/stock_source.py
+?? app/apps/imports/services/xlsx_reader.py
+?? app/apps/imports/tests/test_product_stock_sources.py
+?? app/templates/admin/imports/externaldatafile/change_list.html.0721.0739.bak
+?? app/templates/admin/imports/externaldatafile/reference_validation_summary.html
+?? app/templates/admin/imports/externaldatafile/upload_source.html
+?? docs/patches/

@@ -1,0 +1,20 @@
+Freight estimate{% if estimates|length != 1 %}s{% endif %} for {{ client.name }}
+
+{% for estimate in estimates %}
+Reference: {{ estimate.reference }}
+Created: {{ estimate.created_at|date:"d M Y H:i" }}
+Destination: {{ estimate.destination_label }}
+Total weight: {{ estimate.total_weight_kg|default:"—" }} kg
+Total cubic: {{ estimate.total_cubic_m3|default:"—" }} m³
+Best estimate ex GST: {% if estimate.best_estimate_ex_gst != None %}${{ estimate.best_estimate_ex_gst }}{% else %}—{% endif %}
+
+Freight items:
+{% for line in estimate.input_snapshot.lines %}- {{ line.sku }} | Qty {{ line.quantity }} | {{ line.freight_type }} | {{ line.length_m }} x {{ line.width_m }} x {{ line.height_m }} m | {{ line.weight_kg }} kg
+{% endfor %}
+Available freight options:
+{% for result in estimate.result_snapshot %}- {{ result.carrier }} / {{ result.service }}: ${{ result.estimate_ex_gst }} ex GST
+{% endfor %}
+----------------------------------------
+{% endfor %}
+
+Rates are estimates only and exclude GST. Final pricing may vary due to applicable fuel surcharges and shipment conditions.

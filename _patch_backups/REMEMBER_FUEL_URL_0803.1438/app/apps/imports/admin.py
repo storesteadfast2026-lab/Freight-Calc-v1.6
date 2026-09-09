@@ -1,0 +1,738 @@
+import json
+import mimetypes
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.core.files.base import ContentFile
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404, redirect
+from django.template.loader import render_to_string
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+
+from apps.imports.forms import (
+    ExternalDataFileAdminForm,
+    FetchFuelForm,
+    FuelActivationForm,
+    FuelRollbackForm,
+    SourceUploadForm,
+)
+from apps.imports.models import ExternalDataFile, ProductSourceRow, StockSourceRow
+from apps.imports.services.audit import create_audit_event
+from apps.imports.services.fuel import (
+    FuelImportError,
+    activate_fuel_file,
+    calculate_sha256,
+    create_downloaded_fuel_file,
+    rollback_fuel_file,
+    validate_fuel_file,
+)
+from apps.imports.services.product_source import validate_product_source_file
+from apps.imports.services.stock_source import validate_stock_source_file
+from apps.imports.services.xlsx_reader import SourceImportError
+
+
+REFERENCE_FILE_TYPES = {'PRODUCTS', 'STOCK'}
+
+
+@admin.register(ExternalDataFile)
+class ExternalDataFileAdmin(admin.ModelAdmin):
+    form = ExternalDataFileAdminForm
+    change_list_template = 'admin/imports/externaldatafile/change_list.html'
+    list_display = (
+        'client', 'file_type', 'original_filename', 'source_method', 'status',
+        'uploaded_at', 'activated_at', 'operation_links',
+    )
+    list_filter = ('client', 'file_type', 'source_method', 'status')
+    search_fields = ('original_filename', 'stored_path', 'sha256', 'source_url')
+    date_hierarchy = 'uploaded_at'
+    ordering = ('-uploaded_at',)
+
+    @staticmethod
+    def _require_permission(request, permission):
+        if not request.user.has_perm(permission):
+            raise PermissionDenied(f'Missing permission: {permission}')
+
+    def get_urls(self):
+        custom_urls = [
+            path(
+                'fetch-fuel/',
+                self.admin_site.admin_view(self.fetch_fuel_view),
+                name='imports_externaldatafile_fetch_fuel',
+            ),
+            path(
+                'upload-products/',
+                self.admin_site.admin_view(self.upload_products_view),
+                name='imports_externaldatafile_upload_products',
+            ),
+            path(
+                'upload-stock/',
+                self.admin_site.admin_view(self.upload_stock_view),
+                name='imports_externaldatafile_upload_stock',
+            ),
+            path(
+                '<int:object_id>/validate-source/',
+                self.admin_site.admin_view(self.validate_reference_source_view),
+                name='imports_externaldatafile_validate_source',
+            ),
+            path(
+                '<int:object_id>/validate-fuel/',
+                self.admin_site.admin_view(self.validate_fuel_view),
+                name='imports_externaldatafile_validate_fuel',
+            ),
+            path(
+                '<int:object_id>/activate-fuel/',
+                self.admin_site.admin_view(self.activate_fuel_view),
+                name='imports_externaldatafile_activate_fuel',
+            ),
+            path(
+                '<int:object_id>/rollback-fuel/',
+                self.admin_site.admin_view(self.rollback_fuel_view),
+                name='imports_externaldatafile_rollback_fuel',
+            ),
+            path(
+                '<int:object_id>/download/',
+                self.admin_site.admin_view(self.download_view),
+                name='imports_externaldatafile_download',
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def get_readonly_fields(self, request, obj=None):
+        system_fields = (
+            'source_method', 'source_url', 'original_filename', 'stored_path',
+            'file_size_bytes', 'mime_type', 'sha256', 'uploaded_by', 'uploaded_at',
+            'status', 'validation_summary_display', 'validated_by', 'validated_at',
+            'import_summary_display', 'imported_by', 'last_imported_at',
+            'activated_by', 'activated_at', 'rolled_back_by', 'rolled_back_at',
+            'previous_active_file', 'error_message',
+        )
+        if obj is None:
+            return system_fields
+        return ('client', 'file_type', 'uploaded_file') + system_fields
+
+    def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return (
+                ('Manual external source upload', {
+                    'fields': ('client', 'file_type', 'uploaded_file', 'notes'),
+                    'description': (
+                        'Fuel accepts .csv. Product and stock reference sources accept .xlsx. '
+                        'Product/stock uploads do not change operational data.'
+                    ),
+                }),
+            )
+
+        fieldsets = [
+            ('File', {'fields': (
+                'client', 'file_type', 'source_method', 'source_url', 'original_filename',
+                'uploaded_file', 'stored_path', 'file_size_bytes', 'mime_type', 'sha256', 'notes',
+            )}),
+            ('Upload', {'fields': ('uploaded_by', 'uploaded_at', 'status')}),
+            ('Validation', {'fields': (
+                'validated_by', 'validated_at', 'validation_summary_display', 'error_message',
+            )}),
+        ]
+        if obj.file_type == 'FUEL':
+            fieldsets.append(
+                ('Activation and rollback', {'fields': (
+                    'imported_by', 'last_imported_at', 'activated_by', 'activated_at',
+                    'rolled_back_by', 'rolled_back_at', 'previous_active_file',
+                    'import_summary_display',
+                )})
+            )
+        return tuple(fieldsets)
+
+    @staticmethod
+    def _decimal_or_none(value):
+        if value in (None, ''):
+            return None
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalise_summary_messages(values):
+        messages_out = []
+        for value in values or []:
+            if isinstance(value, (dict, list)):
+                messages_out.append(json.dumps(value, ensure_ascii=False, sort_keys=True))
+            else:
+                messages_out.append(str(value))
+        return messages_out
+
+    @admin.display(description='Validation summary')
+    def validation_summary_display(self, obj):
+        summary = obj.validation_summary or {}
+        if not summary:
+            return format_html('<span class="help">No validation summary is available.</span>')
+        if obj.file_type in REFERENCE_FILE_TYPES:
+            return self._reference_validation_summary(obj, summary)
+        return self._fuel_validation_summary(obj, summary)
+
+    def _reference_validation_summary(self, obj, summary):
+        errors = self._normalise_summary_messages(summary.get('errors'))
+        warnings = self._normalise_summary_messages(summary.get('warnings'))
+        rows_invalid = int(summary.get('rows_invalid') or 0)
+        if errors or rows_invalid:
+            status_label = 'Validation failed'
+            status_class = 'sth-status-error'
+        elif warnings:
+            status_label = 'Validated with warnings'
+            status_class = 'sth-status-warning'
+        else:
+            status_label = 'Validated'
+            status_class = 'sth-status-success'
+
+        sha256 = obj.sha256 or ''
+        sha256_short = f'{sha256[:8]}…{sha256[-6:]}' if len(sha256) > 16 else (sha256 or '—')
+        context = {
+            'summary': summary,
+            'status_label': status_label,
+            'status_class': status_class,
+            'source_label': 'PRODUCT SOURCE' if obj.file_type == 'PRODUCTS' else 'STOCK SOURCE',
+            'file_type': obj.file_type,
+            'preview_rows': summary.get('preview') or [],
+            'warnings': warnings,
+            'errors': errors,
+            'sha256': sha256,
+            'sha256_short': sha256_short,
+            'original_filename': obj.original_filename or '—',
+            'source_method': obj.source_method or '—',
+            'uploaded_by': obj.uploaded_by,
+            'uploaded_at': obj.uploaded_at,
+            'raw_json': json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True),
+        }
+        return mark_safe(render_to_string(
+            'admin/imports/externaldatafile/reference_validation_summary.html',
+            context,
+        ))
+
+    def _fuel_validation_summary(self, obj, summary):
+        preview_rows = []
+        for item in summary.get('preview') or []:
+            current_rate = self._decimal_or_none(item.get('current_rate'))
+            new_rate = self._decimal_or_none(item.get('new_rate'))
+            difference = None
+            if current_rate is not None and new_rate is not None:
+                difference = (new_rate - current_rate) * Decimal('100')
+
+            result = str(item.get('result') or '').upper()
+            preview_rows.append({
+                'carrier': item.get('carrier') or '-',
+                'service': item.get('service') or '-',
+                'ratecard': item.get('ratecard') or '-',
+                'config_id': item.get('config_id') or '-',
+                'current_rate_display': (
+                    f'{current_rate * 100:.2f}%' if current_rate is not None else '—'
+                ),
+                'new_rate_display': (
+                    f'{new_rate * 100:.2f}%' if new_rate is not None else '—'
+                ),
+                'difference_display': (
+                    f'{difference:+.2f} pp' if difference is not None else '—'
+                ),
+                'result': result,
+                'result_label': {
+                    'CHANGE': 'Change',
+                    'UNCHANGED': 'Unchanged',
+                }.get(result, result.title() or 'Unknown'),
+                'result_class': {
+                    'CHANGE': 'sth-result-change',
+                    'UNCHANGED': 'sth-result-unchanged',
+                }.get(result, 'sth-result-info'),
+            })
+
+        errors = self._normalise_summary_messages(summary.get('errors'))
+        warnings = self._normalise_summary_messages(summary.get('warnings'))
+        rows_invalid = int(summary.get('rows_invalid') or 0)
+        is_expired = bool(summary.get('is_expired'))
+
+        if errors or rows_invalid:
+            status_label = 'Validation failed'
+            status_class = 'sth-status-error'
+        elif is_expired:
+            status_label = 'Validated — expired'
+            status_class = 'sth-status-warning'
+        elif warnings:
+            status_label = 'Validated with warnings'
+            status_class = 'sth-status-warning'
+        else:
+            status_label = 'Validated'
+            status_class = 'sth-status-success'
+
+        change_rows = [row for row in preview_rows if row['result'] == 'CHANGE']
+        unchanged_rows = [row for row in preview_rows if row['result'] == 'UNCHANGED']
+        sha256 = obj.sha256 or ''
+        sha256_short = f'{sha256[:8]}…{sha256[-6:]}' if len(sha256) > 16 else (sha256 or '—')
+
+        context = {
+            'summary': summary,
+            'status_label': status_label,
+            'status_class': status_class,
+            'change_rows': change_rows,
+            'unchanged_rows': unchanged_rows,
+            'warnings': warnings,
+            'errors': errors,
+            'ratecards_matched': summary.get('ratecards_matched') or [],
+            'ratecards_not_found': summary.get('ratecards_not_found_in_django') or [],
+            'django_ratecards_missing': summary.get('django_ratecards_missing_from_file') or [],
+            'sha256': sha256,
+            'sha256_short': sha256_short,
+            'original_filename': obj.original_filename or '—',
+            'source_method': obj.source_method or '—',
+            'source_url': obj.source_url or '—',
+            'uploaded_by': obj.uploaded_by,
+            'uploaded_at': obj.uploaded_at,
+            'raw_json': json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True),
+        }
+        return mark_safe(render_to_string(
+            'admin/imports/externaldatafile/validation_summary.html',
+            context,
+        ))
+
+    @admin.display(description='Import summary')
+    def import_summary_display(self, obj):
+        return format_html(
+            '<pre style="white-space:pre-wrap">{}</pre>',
+            json.dumps(obj.import_summary, indent=2),
+        )
+
+    @admin.display(description='Operations')
+    def operation_links(self, obj):
+        links = []
+        if obj.uploaded_file or obj.stored_path:
+            links.append(format_html(
+                '<a href="{}">Download</a>',
+                reverse('admin:imports_externaldatafile_download', args=[obj.pk]),
+            ))
+
+        if obj.file_type == 'FUEL':
+            if obj.status in {'UPLOADED', 'DOWNLOADED', 'VALIDATED', 'VALIDATION_FAILED', 'IMPORT_FAILED'}:
+                links.append(format_html(
+                    '<a href="{}">Validate</a>',
+                    reverse('admin:imports_externaldatafile_validate_fuel', args=[obj.pk]),
+                ))
+            if obj.status == 'VALIDATED':
+                links.append(format_html(
+                    '<a href="{}">Activate</a>',
+                    reverse('admin:imports_externaldatafile_activate_fuel', args=[obj.pk]),
+                ))
+            if obj.status == 'ACTIVE':
+                links.append(format_html(
+                    '<a href="{}">Rollback</a>',
+                    reverse('admin:imports_externaldatafile_rollback_fuel', args=[obj.pk]),
+                ))
+        elif obj.file_type in REFERENCE_FILE_TYPES:
+            if obj.status in {'UPLOADED', 'VALIDATED', 'VALIDATION_FAILED', 'IMPORT_FAILED'}:
+                links.append(format_html(
+                    '<a href="{}">Validate</a>',
+                    reverse('admin:imports_externaldatafile_validate_source', args=[obj.pk]),
+                ))
+            if obj.status == 'VALIDATED':
+                if obj.file_type == 'PRODUCTS':
+                    row_url = reverse('admin:imports_productsourcerow_changelist')
+                else:
+                    row_url = reverse('admin:imports_stocksourcerow_changelist')
+                row_url = f'{row_url}?{urlencode({"external_file__id__exact": obj.pk})}'
+                links.append(format_html('<a href="{}">View rows</a>', row_url))
+
+        return format_html(' &nbsp;|&nbsp; '.join('{}' for _ in links), *links) if links else '-'
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            uploaded = form.cleaned_data['uploaded_file']
+            uploaded.seek(0)
+            content = uploaded.read()
+            uploaded.seek(0)
+            obj.source_method = 'ADMIN_UPLOAD'
+            obj.source_url = ''
+            obj.original_filename = Path(uploaded.name).name
+            obj.file_size_bytes = len(content)
+            fallback_type = 'text/csv' if obj.file_type == 'FUEL' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            obj.mime_type = (
+                getattr(uploaded, 'content_type', '')
+                or mimetypes.guess_type(uploaded.name)[0]
+                or fallback_type
+            )
+            obj.sha256 = calculate_sha256(content)
+            obj.uploaded_by = request.user
+            obj.status = 'UPLOADED'
+        super().save_model(request, obj, form, change)
+        if not change:
+            obj.stored_path = obj.uploaded_file.name
+            obj.save(update_fields=['stored_path'])
+            event_type = {
+                'FUEL': 'FUEL_FILE_UPLOADED',
+                'PRODUCTS': 'PRODUCT_SOURCE_UPLOADED',
+                'STOCK': 'STOCK_SOURCE_UPLOADED',
+            }.get(obj.file_type, 'EXTERNAL_FILE_UPLOADED')
+            create_audit_event(
+                event_type=event_type,
+                message=f'{obj.get_file_type_display()} file uploaded for {obj.client.code}.',
+                actor=request.user,
+                client=obj.client,
+                external_file=obj,
+                metadata={
+                    'source_method': obj.source_method,
+                    'original_filename': obj.original_filename,
+                    'stored_filename': obj.uploaded_file.name,
+                    'file_size_bytes': obj.file_size_bytes,
+                    'mime_type': obj.mime_type,
+                    'sha256': obj.sha256,
+                    'operational_tables_updated': False if obj.file_type in REFERENCE_FILE_TYPES else None,
+                },
+                request=request,
+            )
+
+    def has_delete_permission(self, request, obj=None):
+        # Import files form part of the audit trail and should be archived, not deleted.
+        return False
+
+    def upload_products_view(self, request):
+        return self._source_upload_view(
+            request,
+            file_type='PRODUCTS',
+            title='Upload product_sth.xlsx',
+            expected_filename='product_sth.xlsx',
+        )
+
+    def upload_stock_view(self, request):
+        return self._source_upload_view(
+            request,
+            file_type='STOCK',
+            title='Upload stock_sth.xlsx',
+            expected_filename='stock_sth.xlsx',
+        )
+
+    def _source_upload_view(self, request, *, file_type, title, expected_filename):
+        if not self.has_add_permission(request):
+            raise Http404
+        form = SourceUploadForm(
+            request.POST or None,
+            request.FILES or None,
+            expected_filename=expected_filename,
+        )
+        if request.method == 'POST' and form.is_valid():
+            uploaded = form.cleaned_data['uploaded_file']
+            uploaded.seek(0)
+            content = uploaded.read()
+            uploaded.seek(0)
+            filename = Path(uploaded.name).name
+            external_file = ExternalDataFile(
+                client=form.cleaned_data['client'],
+                file_type=file_type,
+                source_method='ADMIN_UPLOAD',
+                source_url='',
+                original_filename=filename,
+                file_size_bytes=len(content),
+                mime_type=(
+                    getattr(uploaded, 'content_type', '')
+                    or mimetypes.guess_type(filename)[0]
+                    or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                ),
+                sha256=calculate_sha256(content),
+                notes=form.cleaned_data['notes'],
+                uploaded_by=request.user,
+                status='UPLOADED',
+            )
+            external_file.uploaded_file.save(filename, ContentFile(content), save=False)
+            external_file.save()
+            external_file.stored_path = external_file.uploaded_file.name
+            external_file.save(update_fields=['stored_path'])
+
+            create_audit_event(
+                event_type=(
+                    'PRODUCT_SOURCE_UPLOADED' if file_type == 'PRODUCTS'
+                    else 'STOCK_SOURCE_UPLOADED'
+                ),
+                message=f'{expected_filename} uploaded for {external_file.client.code}.',
+                actor=request.user,
+                client=external_file.client,
+                external_file=external_file,
+                metadata={
+                    'source_method': external_file.source_method,
+                    'original_filename': filename,
+                    'stored_filename': external_file.uploaded_file.name,
+                    'file_size_bytes': len(content),
+                    'mime_type': external_file.mime_type,
+                    'sha256': external_file.sha256,
+                    'operational_tables_updated': False,
+                },
+                request=request,
+            )
+
+            try:
+                summary = self._validate_reference_source(
+                    external_file,
+                    actor=request.user,
+                    request=request,
+                )
+                self.message_user(
+                    request,
+                    f'Reference source validated: {summary["rows_valid"]} rows stored. '
+                    'No operational data was modified.',
+                    messages.SUCCESS,
+                )
+            except SourceImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+            return redirect(
+                reverse('admin:imports_externaldatafile_change', args=[external_file.pk])
+            )
+
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'title': title,
+            'form': form,
+            'expected_filename': expected_filename,
+        }
+        return TemplateResponse(
+            request,
+            'admin/imports/externaldatafile/upload_source.html',
+            context,
+        )
+
+    @staticmethod
+    def _validate_reference_source(obj, *, actor=None, request=None):
+        if obj.file_type == 'PRODUCTS':
+            return validate_product_source_file(obj, actor=actor, request=request)
+        if obj.file_type == 'STOCK':
+            return validate_stock_source_file(obj, actor=actor, request=request)
+        raise SourceImportError('This file is not a product or stock reference source.')
+
+    def validate_reference_source_view(self, request, object_id):
+        self._require_permission(request, 'imports.validate_external_data_file')
+        obj = get_object_or_404(
+            ExternalDataFile,
+            pk=object_id,
+            file_type__in=REFERENCE_FILE_TYPES,
+        )
+        if request.method == 'POST':
+            try:
+                summary = self._validate_reference_source(
+                    obj,
+                    actor=request.user,
+                    request=request,
+                )
+                self.message_user(
+                    request,
+                    f'Reference validation passed: {summary["rows_valid"]} rows stored. '
+                    'No operational data was modified.',
+                    messages.SUCCESS,
+                )
+            except SourceImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+            return redirect(reverse('admin:imports_externaldatafile_change', args=[obj.pk]))
+        return self._action_confirmation(
+            request,
+            obj,
+            title=f'Validate {obj.get_file_type_display()} reference source',
+            action_label='Validate',
+            explanation=(
+                'This reads the workbook into isolated staging tables. '
+                'It does not update Product, FreightRate, FreightZone, carrier configuration, '
+                'fuel values or the calculator.'
+            ),
+        )
+
+    def fetch_fuel_view(self, request):
+        if not self.has_add_permission(request):
+            raise Http404
+        form = FetchFuelForm(request.POST or None)
+        if request.method == 'POST' and form.is_valid():
+            try:
+                external_file = create_downloaded_fuel_file(
+                    client=form.cleaned_data['client'],
+                    actor=request.user,
+                    notes=form.cleaned_data['notes'],
+                    request=request,
+                )
+                validate_fuel_file(external_file, actor=request.user, request=request)
+                self.message_user(
+                    request,
+                    'Fuel file downloaded and validated. Review the preview before activation.',
+                    messages.SUCCESS,
+                )
+                return redirect(
+                    reverse('admin:imports_externaldatafile_change', args=[external_file.pk])
+                )
+            except FuelImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'title': 'Fetch fuel from source',
+            'form': form,
+            'source_url': settings.FUEL_SOURCE_URL,
+        }
+        return TemplateResponse(request, 'admin/imports/externaldatafile/fetch_fuel.html', context)
+
+    def validate_fuel_view(self, request, object_id):
+        self._require_permission(request, 'imports.validate_external_data_file')
+        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        if request.method == 'POST':
+            try:
+                summary = validate_fuel_file(obj, actor=request.user, request=request)
+                self.message_user(
+                    request,
+                    f'Fuel validation passed: {summary["rows_valid"]} rows; '
+                    f'{summary["configs_to_update"]} configurations would change.',
+                    messages.SUCCESS,
+                )
+            except FuelImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+            return redirect(reverse('admin:imports_externaldatafile_change', args=[obj.pk]))
+        return self._action_confirmation(
+            request,
+            obj,
+            title='Validate fuel file',
+            action_label='Validate',
+            explanation='Validation does not change carrier fuel rates.',
+        )
+
+    def activate_fuel_view(self, request, object_id):
+        self._require_permission(request, 'imports.activate_fuel')
+        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        form = FuelActivationForm(request.POST or None, user=request.user)
+        if request.method == 'POST' and form.is_valid():
+            try:
+                summary = activate_fuel_file(
+                    obj,
+                    actor=request.user,
+                    request=request,
+                    force_expired=form.cleaned_data['force_expired'],
+                    justification=form.cleaned_data['justification'],
+                )
+                self.message_user(
+                    request,
+                    f'Fuel rates activated: {summary["configs_updated"]} changed and '
+                    f'{summary["configs_unchanged"]} unchanged.',
+                    messages.SUCCESS,
+                )
+                return redirect(reverse('admin:imports_externaldatafile_change', args=[obj.pk]))
+            except FuelImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+        return self._action_confirmation(
+            request,
+            obj,
+            title='Activate fuel rates',
+            action_label='Activate',
+            explanation='This updates Client carrier configs using master_rate → ratecard.',
+            form=form,
+        )
+
+    def rollback_fuel_view(self, request, object_id):
+        self._require_permission(request, 'imports.rollback_fuel')
+        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        form = FuelRollbackForm(request.POST or None)
+        if request.method == 'POST' and form.is_valid():
+            try:
+                summary = rollback_fuel_file(
+                    obj,
+                    actor=request.user,
+                    request=request,
+                    reason=form.cleaned_data['reason'],
+                )
+                self.message_user(
+                    request,
+                    f'Fuel rollback completed: {summary["configs_restored"]} configurations restored.',
+                    messages.WARNING,
+                )
+                return redirect(reverse('admin:imports_externaldatafile_change', args=[obj.pk]))
+            except FuelImportError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+        return self._action_confirmation(
+            request,
+            obj,
+            title='Rollback active fuel rates',
+            action_label='Rollback',
+            explanation='This restores the values recorded immediately before this activation.',
+            form=form,
+        )
+
+    def _action_confirmation(self, request, obj, *, title, action_label, explanation, form=None):
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'title': title,
+            'action_label': action_label,
+            'explanation': explanation,
+            'object': obj,
+            'form': form,
+            'back_url': reverse('admin:imports_externaldatafile_change', args=[obj.pk]),
+        }
+        return TemplateResponse(request, 'admin/imports/externaldatafile/fuel_action.html', context)
+
+    def download_view(self, request, object_id):
+        self._require_permission(request, 'imports.download_external_data_file')
+        obj = get_object_or_404(ExternalDataFile, pk=object_id)
+        if obj.uploaded_file:
+            try:
+                obj.uploaded_file.open('rb')
+                return FileResponse(
+                    obj.uploaded_file,
+                    as_attachment=True,
+                    filename=obj.original_filename,
+                    content_type=obj.mime_type or 'application/octet-stream',
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                raise Http404('Stored file not found.') from exc
+        if obj.stored_path and Path(obj.stored_path).is_file():
+            return FileResponse(
+                open(obj.stored_path, 'rb'),
+                as_attachment=True,
+                filename=obj.original_filename,
+                content_type=obj.mime_type or 'application/octet-stream',
+            )
+        raise Http404('Stored file not found.')
+
+
+class ReadOnlySourceRowAdmin(admin.ModelAdmin):
+    list_per_page = 100
+    show_full_result_count = False
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return super().has_view_permission(request, obj)
+
+
+@admin.register(ProductSourceRow)
+class ProductSourceRowAdmin(ReadOnlySourceRowAdmin):
+    list_display = (
+        'external_file', 'source_row_number', 'product_code_normalized', 'name',
+        'category', 'weight_kg', 'cubic_m3', 'source_status',
+    )
+    list_filter = ('external_file__client', 'external_file', 'category', 'source_status')
+    search_fields = ('product_code_normalized', 'product_code_raw', 'name', 'description')
+    list_select_related = ('external_file', 'external_file__client')
+    ordering = ('external_file', 'source_row_number')
+
+
+@admin.register(StockSourceRow)
+class StockSourceRowAdmin(ReadOnlySourceRowAdmin):
+    list_display = (
+        'external_file', 'source_row_number', 'product_code_normalized', 'sql_name',
+        'quantity', 'pallet', 'weight_kg', 'cubic_m3', 'location', 'source_status',
+    )
+    list_filter = ('external_file__client', 'external_file', 'location', 'source_status')
+    search_fields = (
+        'product_code_normalized', 'product_code_raw', 'sql_name', 'serial_no', 'movement_number',
+    )
+    list_select_related = ('external_file', 'external_file__client')
+    ordering = ('external_file', 'source_row_number')

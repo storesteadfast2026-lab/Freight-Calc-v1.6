@@ -1,0 +1,30 @@
+STH Freight Calculator documentation validation
+Version: 0728.1256
+Date: 2026-07-28 12:56 Australia/Adelaide
+
+SCOPE
+- Documentation and reusable AI prompt only.
+- No application code, migrations, templates, styles, fixtures, reports or workbooks modified.
+
+PROMPT CHECKS
+PASS - docs/20_ai_project_continuation_prompt.md exists.
+PASS - README.md references docs/20_ai_project_continuation_prompt.md.
+PASS - docs/13_ai_spec_driven_workflow.md identifies the canonical prompt.
+PASS - docs/19_documentation_status.md lists the prompt as a canonical source.
+PASS - active path is C:\Docker-Projects\Freight-Calc-Nuevo.
+PASS - review ZIP and full repository workbook paths are distinguished.
+PASS - fixed live_latest paths are retained.
+PASS - fixed random_current paths and filenames are retained.
+PASS - random_current incompleteness is explicitly recorded.
+PASS - live_latest 97 OK / 0 FAIL is described as dated snapshot evidence.
+PASS - unsupported formulas remain pending and are not invented.
+PASS - user/access V1 and pending SMTP work are distinguished.
+PASS - required change explanation, PowerShell commands, documentation updates and MMDD.HHMM versioning are included.
+
+PACKAGE CHECKS
+PASS - package contains Markdown/text documentation only.
+PASS - no .py, migration, HTML, CSS, CSV, XLSX or Docker build files are present.
+PASS - previous canonicalization files remain included.
+
+RESULT
+PASS - updated documentation patch is ready to copy over the project root.

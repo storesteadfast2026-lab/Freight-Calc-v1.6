@@ -1,0 +1,125 @@
+<style>
+  .sth-source-summary { max-width: 1120px; }
+  .sth-source-head { border-radius: 7px; padding: 12px 14px; margin-bottom: 10px; }
+  .sth-status-success { background: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; }
+  .sth-status-warning { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+  .sth-status-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+  .sth-source-title { font-size: 15px; font-weight: 700; }
+  .sth-source-meta, .sth-source-counts { margin-top: 4px; }
+  .sth-reference-note { background: #cff4fc; color: #055160; border: 1px solid #b6effb; border-radius: 6px; padding: 9px 11px; margin: 8px 0; }
+  .sth-source-table-wrap { overflow-x: auto; border: 1px solid var(--hairline-color, #ddd); border-radius: 6px; margin: 8px 0; }
+  .sth-source-table { width: 100%; border-collapse: collapse; background: var(--body-bg, #fff); }
+  .sth-source-table th, .sth-source-table td { padding: 7px 8px; border-bottom: 1px solid var(--hairline-color, #ddd); text-align: left; white-space: nowrap; }
+  .sth-source-table th { background: var(--darkened-bg, #f4f4f4); font-size: 12px; }
+  .sth-source-table tr:last-child td { border-bottom: 0; }
+  .sth-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+  .sth-alert { border-radius: 6px; margin: 8px 0; padding: 9px 11px; }
+  .sth-alert-warning { background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+  .sth-alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+  .sth-details { border: 1px solid var(--hairline-color, #ddd); border-radius: 6px; padding: 8px 10px; margin-top: 8px; background: var(--body-bg, #fff); }
+  .sth-details summary { cursor: pointer; font-weight: 600; }
+  .sth-raw-json { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 9px 0 0; padding: 10px; border-radius: 4px; background: var(--darkened-bg, #f4f4f4); }
+  .sth-tech-table th { width: 190px; }
+</style>
+
+<div class="sth-source-summary">
+  <div class="sth-source-head {{ status_class }}">
+    <div class="sth-source-title">{{ source_label }} — {{ status_label|upper }}</div>
+    <div class="sth-source-meta">
+      Sheet {{ summary.worksheet|default:"—" }} ·
+      {{ summary.rows_valid|default:0 }}/{{ summary.rows_received|default:0 }} valid ·
+      SHA {{ sha256_short }}
+    </div>
+    <div class="sth-source-counts">
+      {{ summary.rows_skipped_empty|default:0 }} empty skipped ·
+      {{ summary.duplicate_skus|length }} duplicate SKU{{ summary.duplicate_skus|length|pluralize }} ·
+      {{ errors|length }} error{{ errors|length|pluralize }}
+    </div>
+  </div>
+
+  <div class="sth-reference-note">
+    <strong>Reference data only.</strong> No operational product, rate, zone, carrier, fuel or calculator data was modified.
+  </div>
+
+  {% for error in errors %}
+    <div class="sth-alert sth-alert-error"><strong>Error:</strong> {{ error }}</div>
+  {% endfor %}
+  {% for warning in warnings %}
+    <div class="sth-alert sth-alert-warning">{{ warning }}</div>
+  {% endfor %}
+
+  {% if preview_rows %}
+    <div class="sth-source-table-wrap">
+      <table class="sth-source-table">
+        <thead>
+          {% if file_type == 'PRODUCTS' %}
+            <tr>
+              <th>Row</th><th>SKU</th><th>Name</th><th>Dimensions mm</th>
+              <th class="sth-num">Weight</th><th class="sth-num">Cubic</th>
+              <th class="sth-num">Pallet</th><th>Status</th>
+            </tr>
+          {% else %}
+            <tr>
+              <th>Row</th><th>SKU</th><th>Name</th><th class="sth-num">Qty</th>
+              <th class="sth-num">Pallet</th><th class="sth-num">Weight</th>
+              <th class="sth-num">Cubic</th><th>Location</th><th>Status</th>
+            </tr>
+          {% endif %}
+        </thead>
+        <tbody>
+          {% for row in preview_rows %}
+            {% if file_type == 'PRODUCTS' %}
+              <tr>
+                <td>{{ row.row }}</td><td><code>{{ row.sku }}</code></td><td>{{ row.name }}</td>
+                <td>{{ row.length_mm|default:"—" }} × {{ row.width_mm|default:"—" }} × {{ row.height_mm|default:"—" }}</td>
+                <td class="sth-num">{{ row.weight_kg|default:"—" }}</td>
+                <td class="sth-num">{{ row.cubic_m3|default:"—" }}</td>
+                <td class="sth-num">{{ row.pallet|default:"—" }}</td><td>{{ row.status }}</td>
+              </tr>
+            {% else %}
+              <tr>
+                <td>{{ row.row }}</td><td><code>{{ row.sku }}</code></td><td>{{ row.name }}</td>
+                <td class="sth-num">{{ row.quantity|default:"—" }}</td>
+                <td class="sth-num">{{ row.pallet|default:"—" }}</td>
+                <td class="sth-num">{{ row.weight_kg|default:"—" }}</td>
+                <td class="sth-num">{{ row.cubic_m3|default:"—" }}</td>
+                <td>{{ row.location }}</td><td>{{ row.status }}</td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <details class="sth-details">
+    <summary>Additional details</summary>
+    <div class="sth-source-table-wrap">
+      <table class="sth-source-table sth-tech-table">
+        <tbody>
+          <tr><th>File</th><td>{{ original_filename }}</td></tr>
+          <tr><th>Expected filename</th><td>{{ summary.source_filename_expected|default:"—" }}</td></tr>
+          <tr><th>Source method</th><td>{{ source_method }}</td></tr>
+          <tr><th>Worksheet</th><td>{{ summary.worksheet|default:"—" }}</td></tr>
+          <tr><th>Header row</th><td>{{ summary.header_row|default:"—" }}</td></tr>
+          <tr><th>Uploaded by</th><td>{{ uploaded_by|default:"—" }}</td></tr>
+          <tr><th>Uploaded at</th><td>{{ uploaded_at|default:"—" }}</td></tr>
+          <tr><th>Full SHA-256</th><td><code>{{ sha256|default:"—" }}</code></td></tr>
+          <tr><th>Matched Django products</th><td>{{ summary.django_products_matched|default:0 }}</td></tr>
+          {% if file_type == 'PRODUCTS' %}
+            <tr><th>Source products not in Django</th><td>{{ summary.source_products_not_in_django|default:0 }}</td></tr>
+            <tr><th>Django products missing from source</th><td>{{ summary.django_products_missing_from_source|default:0 }}</td></tr>
+          {% else %}
+            <tr><th>Stock products not in Django</th><td>{{ summary.stock_products_not_in_django|default:0 }}</td></tr>
+          {% endif %}
+          <tr><th>Duplicate file</th><td>{{ summary.duplicate_file_id|default:"No" }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="sth-details">
+    <summary>Raw validation JSON</summary>
+    <pre class="sth-raw-json">{{ raw_json }}</pre>
+  </details>
+</div>

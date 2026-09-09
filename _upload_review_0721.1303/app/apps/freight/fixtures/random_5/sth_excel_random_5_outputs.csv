@@ -1,0 +1,5 @@
+﻿case_id,rank,expected_carrier,expected_service,expected_estimate_ex_gst,validation_status,source,notes
+RANDOM_5_002,1,TEAMEX,ROAD,2855.66,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+RANDOM_5_004,1,COCHRN,ROAD,1587.34,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+RANDOM_5_004,2,TEAMEX,ROAD,4584.20,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.
+RANDOM_5_005,1,TEAMEX,ROAD,1109.20,generated_from_excel_live,Microsoft Excel automation,Generated on demand from live Excel workbook.

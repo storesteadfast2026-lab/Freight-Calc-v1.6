@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Saved estimates</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/saved_estimates/estimates.css">
+</head>
+<body class="calculator-page">
+<header class="fc-header">
+  <div class="fc-header-inner">
+    <div class="fc-brand">
+      <strong>Saved estimates</strong>
+      <span>Verified freight calculation snapshots</span>
+    </div>
+    <div class="fc-account">
+      <a class="estimate-history-link" href="/">Back to calculator</a>
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="fc-signout">Sign out</button>
+      </form>
+    </div>
+  </div>
+</header>
+<main class="estimate-page">
+  <section class="card estimate-list-card">
+    <div class="estimate-list-heading">
+      <div>
+        <h1>Saved estimates</h1>
+        <p>Customers see only estimates they created. Internal users see authorised clients.</p>
+      </div>
+    </div>
+    {% if estimates %}
+      <div class="estimate-table-wrap">
+        <table class="estimate-table">
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Created</th>
+              <th>Client</th>
+              <th>Destination</th>
+              <th>Best estimate ex GST</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for estimate in estimates %}
+              <tr>
+                <td><strong>{{ estimate.reference }}</strong></td>
+                <td>{{ estimate.created_at|date:"d M Y H:i" }}</td>
+                <td>{{ estimate.client.code }}</td>
+                <td>{{ estimate.destination_label|default:"—" }}</td>
+                <td>{% if estimate.best_estimate_ex_gst != None %}${{ estimate.best_estimate_ex_gst }}{% else %}—{% endif %}</td>
+                <td class="estimate-row-actions">
+                  <a href="{% url 'saved_estimates:print' estimate.reference %}">Print / PDF</a>
+                  {% if can_export_estimates %}
+                    <a href="/?client={{ estimate.client.code|urlencode }}&duplicate={{ estimate.reference|urlencode }}">Duplicate</a>
+                    <a href="{% url 'saved_estimates:csv' estimate.reference %}">CSV</a>
+                    <a href="{% url 'saved_estimates:xlsx' estimate.reference %}">Excel</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="estimate-empty">No saved estimates are available.</p>
+    {% endif %}
+  </section>
+</main>
+</body>
+</html>

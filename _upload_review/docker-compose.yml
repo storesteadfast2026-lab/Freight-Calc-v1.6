@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-freight_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-freight_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-freight_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/django/Dockerfile
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py shell -c 'from apps.carriers.models import Carrier; from apps.rates.models import FreightRate; import sys; ok=Carrier.objects.filter(code=\"KTI\").exists() and FreightRate.objects.filter(carrier_service__carrier__code=\"KTI\").exists(); sys.exit(0 if ok else 1)' ||
+      python manage.py import_sth_excel /app/sample_data/V2026.R2_Unlocked_STH_Freight_Calculator.xlsx --client STH --replace;
+      python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./app:/app
+      - ./sample_data:/app/sample_data
+      - ./reports:/app/reports
+      - ./uploaded_data:/app/uploaded_data
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

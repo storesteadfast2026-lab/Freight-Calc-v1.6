@@ -1,0 +1,10 @@
+{% if saved_estimates_enabled %}
+  <button id="save_estimate" type="button" class="estimate-action" disabled>
+    Save estimate
+  </button>
+  <button id="print_estimate" type="button" class="estimate-action">
+    Print / PDF
+  </button>
+  <button id="new_calculation" type="button" class="estimate-action">New calculation</button>
+  <span id="estimate_action_status" class="estimate-action-status" aria-live="polite"></span>
+{% endif %}

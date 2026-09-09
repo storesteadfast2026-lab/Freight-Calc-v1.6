@@ -1,0 +1,41 @@
+PRE-ZONES BASELINE FREEZE
+Created: 2026-08-27 14:46:57 +09:30
+Purpose: state after Fuel/Postcodes work but before any zones.csv implementation code (pre-0827.1112).
+Zones ExternalDataFile audit/history and uploaded_data are intentionally left unchanged.
+
+ead2feeed989103ebc7e9b0af6ea484b0a540b38931419ec1254b0cea4a721ed  ..\\app\\apps\\carriers\\models.py
+44bc2f87977968758e3c46f181970d46b78a09ee1ca9f80295993284a2246310  ..\\app\\apps\\freight\\services\\calculator.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ..\\app\\apps\\imports\\__init__.py
+099f480fdab985c6117cac9f351d6da984c5400fe723f5978aaaa3b32e173e6f  ..\\app\\apps\\imports\\admin.py
+0a7db8a1513f32af70bfb4651758246dfb5b36bd576b865cefe068efbe9fa220  ..\\app\\apps\\imports\\apps.py
+cab6cc3fa83f02ff2fd2e20c48a108b986f3e5504251d0b5659c249c782b1e49  ..\\app\\apps\\imports\\forms.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ..\\app\\apps\\imports\\management\\__init__.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ..\\app\\apps\\imports\\management\\commands\\__init__.py
+0b25615c1e5106442914af02033648a4cf632f3c25fb89db7dd17f98181a1412  ..\\app\\apps\\imports\\management\\commands\\import_sth_excel.py
+a5d3ecde7a3054e7e4b4a0e1e7d7ff63da0fbdd6876184e87b78ccd1f77d6ddb  ..\\app\\apps\\imports\\management\\commands\\process_uploaded_fuel.py
+b627854357a67b5bc806a5c59d8553567222854c9bafa42577b9abcce85c9394  ..\\app\\apps\\imports\\management\\commands\\process_uploaded_postcodes.py
+7d57b0e477e9cf1fa4ada131fd618e765397339a515bb206105e0c69bc8baf37  ..\\app\\apps\\imports\\management\\commands\\reapply_active_fuel.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ..\\app\\apps\\imports\\migrations\\__init__.py
+2f64a3b386c4db18c388693ad59127ae30d6c56f4b50c42d534f244057d081bc  ..\\app\\apps\\imports\\migrations\\0001_initial.py
+1f2e289a99736d71442cc6bde6295d5fd94e3ff65c86659dc89405ed0d222082  ..\\app\\apps\\imports\\migrations\\0002_fuel_admin_import.py
+f6058b67be950004c315b15fc99d7a6dde461954c8f1d0b24bd93690c3ca04d0  ..\\app\\apps\\imports\\migrations\\0003_product_stock_reference_sources.py
+c1cd949233004464b31068bfd02f38b37307cbcbb5342c86eb95bcb402bb3b70  ..\\app\\apps\\imports\\migrations\\0004_external_data_file_permissions.py
+4c7dac54ce551ffc1a4e263621c540a393f68e4d4a26bf08bfb356736f9f3741  ..\\app\\apps\\imports\\migrations\\0005_externaldatafile_ftp_drop_source.py
+143cdc9f229182ae4f4db89df66000ba5ef4a80f6c486fd35b35cc29fd3f0fb2  ..\\app\\apps\\imports\\models.py
+b99c8b22495145b9b4594d14f622ef296d4b266c1c7c17ff354d6fa481e30933  ..\\app\\apps\\imports\\services\\__init__.py
+edd0728faa3254d922ba1de81614b21e29ec51551f18e419c710708b6a990dbb  ..\\app\\apps\\imports\\services\\audit.py
+024ac05f708aae328d70d7b62d468359de0dea203e44af221b11aa24cef46f8f  ..\\app\\apps\\imports\\services\\fuel.py
+ab50130df1383c8b151a7cc79b04e392eb3dbdc4112c863239ad9b1642786a7c  ..\\app\\apps\\imports\\services\\postcodes.py
+df2e17a1b918cf2d8b6da293eebde6188a98ba8f4615600cc0748e0e0393fac2  ..\\app\\apps\\imports\\services\\product_source.py
+325e25c1caeba91771e8d2cfa2d0f56d5355c4487f64832391023c5d8cefe4b3  ..\\app\\apps\\imports\\services\\stock_source.py
+3c568d965b249566ce2bd904dd09744c05194130da99c187297a6d35e2ee5550  ..\\app\\apps\\imports\\services\\uploaded_data.py
+edd377d9530bf28946ff21c2ac6c6900ae0a602c1a1e38a8a46a833a64ddd08d  ..\\app\\apps\\imports\\services\\xlsx_reader.py
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ..\\app\\apps\\imports\\tests\\__init__.py
+fba90ccc428f925b60c7ce737d21a70234b5b4d7c11cb7029dc2158c04867b41  ..\\app\\apps\\imports\\tests\\test_fuel_import.py
+165810505bbb64cff64ce1c7bfb60e9cc94f89f98544587ba8d7b2dd1e775262  ..\\app\\apps\\imports\\tests\\test_postcodes_import.py
+f914409c6f65716e68a1d44c8944070c9e222b7812da1f9a6c89af4f3bd69782  ..\\app\\apps\\imports\\tests\\test_product_stock_sources.py
+b0ca97132ad4a68c036501d1729b96ffb23e2e102b57d64a144ba637f52fa84b  ..\\app\\apps\\locations\\models.py
+a53ac52b2baa1c46c6d7367871546ba5d3e5a4c38d53fa47d94c8bf30066dfdd  ..\\app\\apps\\rates\\models.py
+6ff80f7584c70ef5e18486cf1c87d14bab9ec807a00b5f650ec61fb64cea22d2  ..\\docs\\07_testing_strategy.md
+fb8b0f015a0d5771e8fa166aba9d48096be6d628b32d5a7cf23a3c80e4c95ade  ..\\docs\\11_validation_runbook.md
+85ce6d7022395e509db512ff1025f9b1fa63d0ea7597afebd2de6fb9275d1b27  ..\\docs\\24_ftp_external_data_pipeline.md
