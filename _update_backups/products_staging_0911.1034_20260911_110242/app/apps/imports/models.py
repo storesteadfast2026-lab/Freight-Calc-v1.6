@@ -138,7 +138,7 @@ class ExternalDataFile(models.Model):
 
 
 class ProductSourceRow(models.Model):
-    """Read-only valid staging row loaded from a Product source file."""
+    """Read-only staging row loaded from product_sth.xlsx."""
 
     external_file = models.ForeignKey(
         ExternalDataFile,
@@ -179,63 +179,6 @@ class ProductSourceRow(models.Model):
 
     def __str__(self):
         return f'{self.external_file_id}:{self.source_row_number} {self.product_code_normalized}'
-
-
-class ProductSourceRejectedRow(models.Model):
-    """Product source row isolated because it cannot be mapped safely."""
-
-    REPAIR_STATUSES = [
-        ('PENDING', 'Pending review'),
-        ('PROPOSED', 'Proposal saved'),
-        ('APPROVED', 'Approved into staging'),
-    ]
-
-    external_file = models.ForeignKey(
-        ExternalDataFile,
-        on_delete=models.CASCADE,
-        related_name='product_rejected_rows',
-        limit_choices_to={'file_type': 'PRODUCTS'},
-    )
-    source_row_number = models.PositiveIntegerField()
-    column_count = models.PositiveIntegerField(null=True, blank=True)
-    raw_values = models.JSONField(default=list, blank=True)
-    validation_errors = models.JSONField(default=list, blank=True)
-    repair_status = models.CharField(
-        max_length=20,
-        choices=REPAIR_STATUSES,
-        default='PENDING',
-        db_index=True,
-    )
-    proposed_data = models.JSONField(default=dict, blank=True)
-    review_note = models.TextField(blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='reviewed_product_source_rejections',
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    staged_row = models.OneToOneField(
-        ProductSourceRow,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='approved_repair',
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['source_row_number']
-        constraints = [
-            models.UniqueConstraint(
-                fields=['external_file', 'source_row_number'],
-                name='imports_product_rejected_file_row_uniq',
-            ),
-        ]
-
-    def __str__(self):
-        return f'{self.external_file_id}:{self.source_row_number} rejected'
 
 
 class StockSourceRow(models.Model):

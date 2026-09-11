@@ -1,0 +1,16 @@
+{% extends "admin/change_form.html" %}
+
+{% block submit_buttons_bottom %}
+  {% if original and original.repair_status == "APPROVED" %}
+    <div class="submit-row">
+      <p class="deletelink-box" style="float:none;margin:0;">
+        Approved into reference staging. This review is now read-only.
+      </p>
+    </div>
+  {% else %}
+    <div class="submit-row">
+      <input type="submit" value="Save proposal only" name="_save_proposal">
+      <input type="submit" value="Approve into staging" name="_approve_repair" class="default">
+    </div>
+  {% endif %}
+{% endblock %}

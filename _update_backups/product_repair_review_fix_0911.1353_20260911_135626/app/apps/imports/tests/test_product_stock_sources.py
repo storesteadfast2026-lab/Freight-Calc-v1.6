@@ -384,7 +384,6 @@ class ProductStockSourceTests(TestCase):
         self.assertEqual(change_response.status_code, 200)
         self.assertContains(change_response, 'Approve into staging')
 
-        external_file.refresh_from_db()
         file_admin = ExternalDataFileAdmin(ExternalDataFile, admin.site)
         self.assertIn('Review rejected rows', str(file_admin.operation_links(external_file)))
 

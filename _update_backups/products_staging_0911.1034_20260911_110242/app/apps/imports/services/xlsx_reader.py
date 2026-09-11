@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-import csv
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -60,24 +59,12 @@ def normalize_sku(value: Any) -> str:
     text = value_to_text(value).strip()
     if not text or text == '0':
         return ''
-    # Decimal accepts underscores inside numeric strings (for example,
-    # ``20504089_``), but underscores can be meaningful in product codes.
-    # Only canonicalise values that are visibly numeric.
-    if re.fullmatch(r'[+-]?\d+(?:\.0+)?', text):
-        try:
-            number = Decimal(text)
-            if number == number.to_integral_value():
-                return str(number.quantize(Decimal('1')))
-        except InvalidOperation:
-            pass
-    return text.upper()
-
-
-def normalize_product_sku(value: Any) -> str:
-    """Normalise Product source codes without discarding meaningful zeroes."""
-    text = value_to_text(value).strip()
-    if not text or text == '0':
-        return ''
+    try:
+        number = Decimal(text)
+        if number == number.to_integral_value():
+            return str(number.quantize(Decimal('1')))
+    except InvalidOperation:
+        pass
     return text.upper()
 
 
@@ -213,89 +200,3 @@ def read_xlsx_records(
         return sheet.title, header_row_number, headers, records
     finally:
         workbook.close()
-
-
-def read_csv_records(
-    content: bytes,
-    *,
-    aliases: dict[str, tuple[str, ...]],
-    required_fields: tuple[str, ...],
-    expected_column_count: int | None = None,
-) -> tuple[str, int, list[str], list[dict[str, Any]], list[dict[str, Any]], str]:
-    """Read a CSV source while isolating rows with the wrong column count.
-
-    The returned malformed rows are deliberately not coerced into the expected
-    schema. This prevents shifted source values from being stored as dimensions,
-    weight, cubic or other product fields.
-    """
-    if not content:
-        raise SourceImportError('The uploaded CSV file is empty.')
-
-    encoding = 'utf-8-sig'
-    try:
-        text = content.decode(encoding)
-    except UnicodeDecodeError:
-        encoding = 'cp1252'
-        text = content.decode(encoding)
-
-    reader = csv.reader(io.StringIO(text, newline=''))
-    try:
-        header_values = next(reader)
-    except StopIteration as exc:
-        raise SourceImportError('The uploaded CSV file is empty.') from exc
-    except csv.Error as exc:
-        raise SourceImportError(f'The CSV header could not be read: {exc}') from exc
-
-    if expected_column_count is not None and len(header_values) != expected_column_count:
-        raise SourceImportError(
-            f'The CSV header has {len(header_values)} columns; '
-            f'{expected_column_count} are required.'
-        )
-
-    mapping = _header_mapping(tuple(header_values), aliases)
-    missing = [field for field in required_fields if field not in mapping]
-    if missing:
-        raise SourceImportError(
-            'The CSV header is missing required columns: ' + ', '.join(missing) + '.'
-        )
-
-    headers = [value_to_text(value) or f'column_{index + 1}' for index, value in enumerate(header_values)]
-    records: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-
-    try:
-        for values in reader:
-            source_row_number = reader.line_num
-            if not values or not any(value.strip() for value in values):
-                continue
-            if len(values) != len(header_values):
-                rejected.append({
-                    'source_row_number': source_row_number,
-                    'column_count': len(values),
-                    'raw_values': values,
-                    'validation_errors': [
-                        f'Row {source_row_number}: expected {len(header_values)} columns; '
-                        f'found {len(values)}.'
-                    ],
-                })
-                continue
-
-            record = {
-                logical_name: values[column_index]
-                for logical_name, column_index in mapping.items()
-            }
-            record['_row_number'] = source_row_number
-            record['_raw_data'] = {
-                headers[index]: value
-                for index, value in enumerate(values)
-                if value != ''
-            }
-            records.append(record)
-    except csv.Error as exc:
-        raise SourceImportError(
-            f'The CSV structure could not be read near row {reader.line_num}: {exc}'
-        ) from exc
-
-    if not records and not rejected:
-        raise SourceImportError('The CSV contains headers but no data rows.')
-    return 'CSV', 1, headers, records, rejected, encoding

@@ -184,12 +184,6 @@ class ProductSourceRow(models.Model):
 class ProductSourceRejectedRow(models.Model):
     """Product source row isolated because it cannot be mapped safely."""
 
-    REPAIR_STATUSES = [
-        ('PENDING', 'Pending review'),
-        ('PROPOSED', 'Proposal saved'),
-        ('APPROVED', 'Approved into staging'),
-    ]
-
     external_file = models.ForeignKey(
         ExternalDataFile,
         on_delete=models.CASCADE,
@@ -200,29 +194,6 @@ class ProductSourceRejectedRow(models.Model):
     column_count = models.PositiveIntegerField(null=True, blank=True)
     raw_values = models.JSONField(default=list, blank=True)
     validation_errors = models.JSONField(default=list, blank=True)
-    repair_status = models.CharField(
-        max_length=20,
-        choices=REPAIR_STATUSES,
-        default='PENDING',
-        db_index=True,
-    )
-    proposed_data = models.JSONField(default=dict, blank=True)
-    review_note = models.TextField(blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='reviewed_product_source_rejections',
-    )
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    staged_row = models.OneToOneField(
-        ProductSourceRow,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='approved_repair',
-    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

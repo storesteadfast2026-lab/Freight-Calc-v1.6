@@ -48,7 +48,7 @@ Django Admin currently accepts three external source types:
 
 | File | Type | Current effect |
 |---|---|---|
-| `products.csv` (legacy `.xlsx` also accepted) | PRODUCTS | Reference-only staging and comparison against Django Products. |
+| `product_sth.xlsx` | PRODUCTS | Reference-only staging and comparison against Django Products. |
 | `stock_sth.xlsx` | STOCK | Reference-only staging and comparison against Django Products. |
 | `fuel.csv` | FUEL | Operational fuel changes only after manual activation. |
 
@@ -85,7 +85,7 @@ Docker persists them through:
 
 Do not commit production uploads to Git.
 
-## 3. Product source — products.csv
+## 3. Product source — product_sth.xlsx
 
 Use:
 
@@ -96,13 +96,12 @@ Imports → External data files → Upload product source
 Current workflow:
 
 ```text
-Upload CSV
+Upload XLSX
 → calculate SHA-256
-→ decode UTF-8 or CP1252
-→ validate the 13 required columns
-→ isolate malformed/invalid/duplicate rows
-→ retain valid rows in staging
-→ compare Product SKUs as trimmed uppercase text with operational Product rows
+→ locate product_sth/products/product worksheet
+→ map required headers by accepted aliases
+→ validate every non-empty row
+→ compare normalised SKUs with operational Product rows
 → replace ProductSourceRow rows for this uploaded file
 → status VALIDATED
 → create audit event
@@ -112,11 +111,8 @@ Important rules:
 
 - all required Product columns must be identifiable;
 - product code is mandatory;
-- malformed or invalid CSV rows are isolated in `ProductSourceRejectedRow`;
-- Product SKU codes preserve meaningful leading zeroes (`0034` and `34` are distinct);
-- Product SKU comparison trims surrounding spaces and ignores letter case;
-- exact duplicate Product codes after this text normalisation are isolated for review;
-- valid rows remain available even when rejected rows exist;
+- invalid numeric values reject the entire staging load;
+- duplicate product codes inside the same source are treated as validation errors;
 - duplicate file content is reported as a warning with the prior file ID;
 - empty placeholder rows are skipped;
 - the source is `reference_only=True`;
@@ -131,39 +127,6 @@ The summary reports:
 - source products not in Django;
 - Django products missing from source;
 - a 25-row preview.
-
-The downloadable validation report includes every valid and rejected row,
-source values, comparison status, fields that differ, and the current
-operational dimensions/weight/cubic when a Django Product matches. It never
-updates the operational Product table.
-
-### 3.1 Controlled repair of malformed Product rows
-
-Malformed rows remain isolated after validation. They are reviewed from the
-specific Product source file through `Review rejected rows`; the rejected-row
-model is deliberately hidden from the main Imports menu.
-
-For each rejected row Django displays:
-
-- the original parsed values and validation error;
-- an editable 13-field reconstruction proposal;
-- `Save proposal only`, which does not enter staging;
-- `Approve into staging`, which requires a review note.
-
-Approval creates one linked `ProductSourceRow` reference record and records the
-reviewer, timestamp, note, original values and approved values. The original
-`ProductSourceRejectedRow` remains as immutable evidence with status
-`APPROVED`. Operational `Product`, freight type, rates, zones and Calculator
-remain unchanged.
-
-Before rolling migration `imports.0010` back, run
-`python manage.py rollback_product_repair_review`. It removes only staging rows
-created by approved repairs, resets their review state and leaves operational
-`Product` data unchanged.
-
-A source file with saved or approved repair reviews cannot be revalidated in
-place. Upload a new source snapshot instead; this prevents a revalidation from
-silently deleting manual review decisions.
 
 `Source products not in Django` is a comparison finding, not a signal that products will be created automatically.
 

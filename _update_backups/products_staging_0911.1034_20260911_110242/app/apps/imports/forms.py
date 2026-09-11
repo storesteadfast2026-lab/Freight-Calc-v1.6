@@ -9,7 +9,7 @@ class ExternalDataFileAdminForm(forms.ModelForm):
     file_type = forms.ChoiceField(
         choices=[
             ('FUEL', 'Fuel CSV'),
-            ('PRODUCTS', 'STH product source (products.csv)'),
+            ('PRODUCTS', 'STH product source (product_sth.xlsx)'),
             ('STOCK', 'STH stock source (stock_sth.xlsx)'),
         ],
         initial='FUEL',
@@ -33,10 +33,8 @@ class ExternalDataFileAdminForm(forms.ModelForm):
         filename = uploaded_file.name.lower()
         if file_type == 'FUEL' and not filename.endswith('.csv'):
             self.add_error('uploaded_file', 'The fuel file must use the .csv extension.')
-        if file_type == 'PRODUCTS' and not filename.endswith(('.csv', '.xlsx')):
-            self.add_error('uploaded_file', 'The product source must use the .csv or .xlsx extension.')
-        if file_type == 'STOCK' and not filename.endswith('.xlsx'):
-            self.add_error('uploaded_file', 'The stock source must use the .xlsx extension.')
+        if file_type in {'PRODUCTS', 'STOCK'} and not filename.endswith('.xlsx'):
+            self.add_error('uploaded_file', 'Product and stock source files must use the .xlsx extension.')
         return cleaned
 
 
@@ -49,18 +47,16 @@ class SourceUploadForm(forms.Form):
         help_text='Optional note for this manual reference-data upload.',
     )
 
-    def __init__(self, *args, expected_filename='', allowed_extensions=('.xlsx',), **kwargs):
+    def __init__(self, *args, expected_filename='', **kwargs):
         super().__init__(*args, **kwargs)
         self.expected_filename = expected_filename
-        self.allowed_extensions = tuple(extension.lower() for extension in allowed_extensions)
         if expected_filename:
             self.fields['uploaded_file'].help_text = f'Expected source: {expected_filename}'
 
     def clean_uploaded_file(self):
         uploaded_file = self.cleaned_data['uploaded_file']
-        if not uploaded_file.name.lower().endswith(self.allowed_extensions):
-            allowed = ' or '.join(self.allowed_extensions)
-            raise forms.ValidationError(f'The source file must use {allowed}.')
+        if not uploaded_file.name.lower().endswith('.xlsx'):
+            raise forms.ValidationError('The source file must use the .xlsx extension.')
         return uploaded_file
 
 

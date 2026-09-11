@@ -73,14 +73,6 @@ def normalize_sku(value: Any) -> str:
     return text.upper()
 
 
-def normalize_product_sku(value: Any) -> str:
-    """Normalise Product source codes without discarding meaningful zeroes."""
-    text = value_to_text(value).strip()
-    if not text or text == '0':
-        return ''
-    return text.upper()
-
-
 def json_safe_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value

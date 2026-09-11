@@ -120,7 +120,7 @@ This version was reconciled against the updated code and `V2026.R2_Unlocked_STH_
 | trace_id | External source | Django Admin | Database | Runtime rule | Evidence/status |
 |---|---|---|---|---|---|
 | `IMP-EXT-001` | Three Admin sources: Product, Stock, Fuel | Imports -> External data files | `ExternalDataFile` | Stores source metadata, file, SHA-256, statuses, summaries and actors | CONFIRMED |
-| `IMP-PROD-001` | `products.csv` | Upload product source / Validate / View rows / Download validation report | `ProductSourceRow`, `ProductSourceRejectedRow` | Reference-only; retains valid rows, isolates rejected rows and compares with Product; no operational update or activation | CONFIRMED |
+| `IMP-PROD-001` | `product_sth.xlsx` | Upload product source / Validate / View rows | `ProductSourceRow` | Reference-only; compares SKUs with Product; no operational update or activation | CONFIRMED |
 | `IMP-STOCK-001` | `stock_sth.xlsx` | Upload stock source / Validate / View rows | `StockSourceRow` | Reference-only; repeated Stock SKUs preserved; no operational update or activation | CONFIRMED |
 | `IMP-ISOLATION-001` | Product/Stock external files | Validation summary | Source rows only | `operational_tables_updated=False`; Product/Rate/Zone/Config unchanged | CONFIRMED by code/tests; rerun runtime tests in current environment |
 

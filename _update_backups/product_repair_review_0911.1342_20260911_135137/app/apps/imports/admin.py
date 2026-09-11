@@ -50,85 +50,11 @@ from apps.imports.services.product_source import (
     build_product_source_validation_report,
     validate_product_source_file,
 )
-from apps.imports.services.product_repair import (
-    ProductRepairError,
-    approve_product_source_repair,
-    build_product_repair_proposal,
-    save_product_repair_proposal,
-)
 from apps.imports.services.stock_source import validate_stock_source_file
-from apps.imports.services.xlsx_reader import SourceImportError, normalize_product_sku
+from apps.imports.services.xlsx_reader import SourceImportError
 
 
 REFERENCE_FILE_TYPES = {'PRODUCTS', 'STOCK'}
-
-
-class ProductSourceRejectedRowReviewForm(forms.ModelForm):
-    code = forms.CharField(label='Product code', max_length=255)
-    name = forms.CharField(max_length=500, required=False)
-    description = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
-    category = forms.CharField(max_length=255, required=False)
-    length_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    width_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    height_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    cubic_m3 = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    quantity = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    weight_kg = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    pallet = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
-    source_status = forms.CharField(label='Source status', max_length=100, required=False)
-
-    class Meta:
-        model = ProductSourceRejectedRow
-        fields = ('review_note',)
-        widgets = {'review_note': forms.Textarea(attrs={'rows': 3})}
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        proposal = dict(self.instance.proposed_data or {})
-        if not proposal:
-            proposal = build_product_repair_proposal(self.instance.raw_values or [])
-        for field_name in (
-            'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
-            'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
-            'source_status',
-        ):
-            if field_name not in self.initial:
-                self.fields[field_name].initial = proposal.get(field_name, '')
-        if self.instance.repair_status == 'APPROVED':
-            for field in self.fields.values():
-                field.disabled = True
-
-    def clean(self):
-        cleaned = super().clean()
-        approving = '_approve_repair' in self.data
-        if approving and self.instance.repair_status == 'APPROVED':
-            raise forms.ValidationError('This repair is already approved and cannot be changed.')
-        if approving and not str(cleaned.get('review_note') or '').strip():
-            self.add_error('review_note', 'A review note is required for approval.')
-        if approving:
-            code = normalize_product_sku(cleaned.get('code'))
-            if not code:
-                self.add_error('code', 'Product code is required.')
-            elif ProductSourceRow.objects.filter(
-                external_file=self.instance.external_file,
-                product_code_normalized=code,
-            ).exists():
-                self.add_error(
-                    'code',
-                    f'Product code {code} already exists in valid staging for this file.',
-                )
-        return cleaned
-
-    def repair_payload(self):
-        return {
-            field_name: self.cleaned_data.get(field_name)
-            for field_name in (
-                'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
-                'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
-                'source_status',
-            )
-        }
 
 
 
@@ -772,10 +698,6 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
             json.dumps(summary, indent=2),
         )
     def _reference_validation_summary(self, obj, summary):
-        summary = dict(summary)
-        summary.setdefault('rows_repaired_approved', 0)
-        summary.setdefault('rows_pending_repair', int(summary.get('rows_invalid') or 0))
-        summary.setdefault('rows_valid_effective', int(summary.get('rows_valid') or 0))
         errors = self._normalise_summary_messages(summary.get('errors'))
         warnings = self._normalise_summary_messages(summary.get('warnings'))
         rows_invalid = int(summary.get('rows_invalid') or 0)
@@ -1078,7 +1000,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                             f'{urlencode({"external_file__id__exact": obj.pk})}'
                         )
                         links.append(format_html(
-                            '<a href="{}">Review rejected rows</a>', rejected_url
+                            '<a href="{}">View rejected rows</a>', rejected_url
                         ))
 
         return format_html(' &nbsp;|&nbsp; '.join('{}' for _ in links), *links) if links else '-'
@@ -1517,143 +1439,13 @@ class ProductSourceRowAdmin(ReadOnlySourceRowAdmin):
 
 
 @admin.register(ProductSourceRejectedRow)
-class ProductSourceRejectedRowAdmin(admin.ModelAdmin):
-    form = ProductSourceRejectedRowReviewForm
-    change_form_template = 'admin/imports/productsourcerejectedrow/change_form.html'
+class ProductSourceRejectedRowAdmin(ReadOnlySourceRowAdmin):
     list_display = (
-        'source_row_number', 'external_file', 'column_count', 'repair_status',
-        'reviewed_by', 'reviewed_at',
+        'external_file', 'source_row_number', 'column_count', 'validation_errors',
     )
-    list_display_links = ('source_row_number',)
-    list_filter = ('repair_status', 'external_file__client', 'external_file')
+    list_filter = ('external_file__client', 'external_file')
     list_select_related = ('external_file', 'external_file__client')
     ordering = ('external_file', 'source_row_number')
-
-    readonly_fields = (
-        'external_file', 'source_row_number', 'column_count',
-        'validation_errors_display', 'raw_values_display', 'proposal_warning',
-        'repair_status', 'reviewed_by', 'reviewed_at', 'staged_row_link',
-    )
-    fieldsets = (
-        ('Original rejected source row', {
-            'fields': (
-                'external_file', 'source_row_number', 'column_count',
-                'validation_errors_display', 'raw_values_display',
-            ),
-        }),
-        ('Editable reconstruction proposal', {
-            'description': (
-                'Verify every value. Saving a proposal does not add it to staging. '
-                'Approval adds only a ProductSourceRow reference record.'
-            ),
-            'fields': (
-                'proposal_warning', 'code', 'name', 'description', 'category',
-                ('length_mm', 'width_mm', 'height_mm'),
-                ('cubic_m3', 'quantity', 'weight_kg', 'pallet'),
-                'comment', 'source_status', 'review_note',
-            ),
-        }),
-        ('Review result', {
-            'fields': (
-                'repair_status', 'reviewed_by', 'reviewed_at', 'staged_row_link',
-            ),
-        }),
-    )
-
-    def get_model_perms(self, request):
-        """Keep this model out of the Imports main menu; contextual links still work."""
-        return {}
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-    def has_view_permission(self, request, obj=None):
-        return request.user.is_active and request.user.is_staff and (
-            request.user.is_superuser
-            or request.user.has_perm('imports.view_productsourcerow')
-        )
-
-    def has_change_permission(self, request, obj=None):
-        return request.user.is_active and request.user.is_staff and (
-            request.user.is_superuser
-            or (
-                request.user.has_perm('imports.change_externaldatafile')
-                and request.user.has_perm('imports.validate_external_data_file')
-            )
-        )
-
-    @admin.display(description='Validation errors')
-    def validation_errors_display(self, obj):
-        return format_html(
-            '<pre style="white-space:pre-wrap;margin:0">{}</pre>',
-            '\n'.join(obj.validation_errors or []) or '-',
-        )
-
-    @admin.display(description='Original parsed values')
-    def raw_values_display(self, obj):
-        return format_html(
-            '<pre style="white-space:pre-wrap;margin:0">{}</pre>',
-            json.dumps(obj.raw_values or [], indent=2, ensure_ascii=False),
-        )
-
-    @admin.display(description='Mandatory review')
-    def proposal_warning(self, obj):
-        return (
-            'The proposal is not authoritative. Verify the name, description, '
-            'quotation marks, comments and every numeric value against Translogic.'
-        )
-
-    @admin.display(description='Staging row')
-    def staged_row_link(self, obj):
-        if not obj.staged_row_id:
-            return '-'
-        url = reverse(
-            'admin:imports_productsourcerow_change',
-            args=[obj.staged_row_id],
-        )
-        return format_html('<a href="{}">View ProductSourceRow #{}</a>', url, obj.staged_row_id)
-
-    def save_model(self, request, obj, form, change):
-        try:
-            if '_approve_repair' in request.POST:
-                updated = approve_product_source_repair(
-                    obj.pk,
-                    payload=form.repair_payload(),
-                    review_note=form.cleaned_data.get('review_note') or '',
-                    actor=request.user,
-                    request=request,
-                )
-            else:
-                updated = save_product_repair_proposal(
-                    obj.pk,
-                    payload=form.repair_payload(),
-                    review_note=form.cleaned_data.get('review_note') or '',
-                    actor=request.user,
-                    request=request,
-                )
-        except ProductRepairError as exc:
-            raise forms.ValidationError(str(exc)) from exc
-        obj.__dict__.update(updated.__dict__)
-
-    def response_change(self, request, obj):
-        if '_approve_repair' in request.POST:
-            self.message_user(
-                request,
-                'Repair approved into ProductSourceRow staging. Operational Product was not modified.',
-                level=messages.SUCCESS,
-            )
-        else:
-            self.message_user(
-                request,
-                'Repair proposal saved. It has not entered staging.',
-                level=messages.SUCCESS,
-            )
-        return redirect(
-            reverse('admin:imports_productsourcerejectedrow_change', args=[obj.pk])
-        )
 
 
 @admin.register(StockSourceRow)

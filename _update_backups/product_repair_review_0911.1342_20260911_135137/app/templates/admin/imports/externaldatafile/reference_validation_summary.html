@@ -27,14 +27,12 @@
     <div class="sth-source-title">{{ source_label }} — {{ status_label|upper }}</div>
     <div class="sth-source-meta">
       {{ summary.source_format|default:"Source" }} ·
-      {{ summary.rows_valid_effective }}/{{ summary.rows_received|default:0 }} valid in staging ·
+      {{ summary.rows_valid|default:0 }}/{{ summary.rows_received|default:0 }} valid ·
       SHA {{ sha256_short }}
     </div>
     <div class="sth-source-counts">
       {{ summary.rows_skipped_empty|default:0 }} empty skipped ·
-      {{ summary.rows_invalid|default:0 }} initially rejected ·
-      {{ summary.rows_repaired_approved|default:0 }} approved repair{{ summary.rows_repaired_approved|default:0|pluralize }} ·
-      {{ summary.rows_pending_repair }} pending repair{{ summary.rows_pending_repair|pluralize }} ·
+      {{ summary.rows_invalid|default:0 }} rejected ·
       {{ summary.duplicate_skus|length }} duplicate SKU{{ summary.duplicate_skus|length|pluralize }} ·
       {{ errors|length }} error{{ errors|length|pluralize }}
     </div>
@@ -97,7 +95,7 @@
 
   {% if summary.rejected_preview %}
     <details class="sth-details">
-      <summary>Initial rejected rows preview ({{ summary.rows_invalid }})</summary>
+      <summary>Rejected rows preview ({{ summary.rows_invalid }})</summary>
       <div class="sth-source-table-wrap">
         <table class="sth-source-table">
           <thead><tr><th>Row</th><th>Columns</th><th>Reason</th></tr></thead>

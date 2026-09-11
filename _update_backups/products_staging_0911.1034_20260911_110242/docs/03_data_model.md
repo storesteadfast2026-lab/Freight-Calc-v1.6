@@ -15,7 +15,6 @@
 - `CarrierTailgateCharge`
 - `ExternalDataFile`
 - `ProductSourceRow`
-- `ProductSourceRejectedRow`
 - `StockSourceRow`
 - `AuditEvent`
 
@@ -25,14 +24,12 @@ The design keeps client-specific products, rates, zones, configurations and exte
 
 `Product` is the operational product master used by the calculator.
 
-`ProductSourceRow`, `ProductSourceRejectedRow` and `StockSourceRow` are isolated,
-read-only staging/reference tables associated with an `ExternalDataFile`:
+`ProductSourceRow` and `StockSourceRow` are isolated, read-only staging/reference tables associated with an `ExternalDataFile`:
 
-- validating `products.csv` replaces only the valid and rejected staging rows for that uploaded Product source file;
+- validating `product_sth.xlsx` replaces only the rows for that uploaded Product source file;
 - validating `stock_sth.xlsx` replaces only the rows for that uploaded Stock source file;
 - neither process changes `Product`, `FreightRate`, `FreightZone`, `ClientCarrierConfig` or calculation logic;
-- each source row retains raw source data and validation information;
-- rejected Product rows are isolated and never coerced into the 13-column schema.
+- each source row retains raw source data and validation information.
 
 ## External-file provenance
 

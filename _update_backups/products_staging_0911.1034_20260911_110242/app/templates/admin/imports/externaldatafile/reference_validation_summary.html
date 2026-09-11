@@ -26,15 +26,12 @@
   <div class="sth-source-head {{ status_class }}">
     <div class="sth-source-title">{{ source_label }} — {{ status_label|upper }}</div>
     <div class="sth-source-meta">
-      {{ summary.source_format|default:"Source" }} ·
-      {{ summary.rows_valid_effective }}/{{ summary.rows_received|default:0 }} valid in staging ·
+      Sheet {{ summary.worksheet|default:"—" }} ·
+      {{ summary.rows_valid|default:0 }}/{{ summary.rows_received|default:0 }} valid ·
       SHA {{ sha256_short }}
     </div>
     <div class="sth-source-counts">
       {{ summary.rows_skipped_empty|default:0 }} empty skipped ·
-      {{ summary.rows_invalid|default:0 }} initially rejected ·
-      {{ summary.rows_repaired_approved|default:0 }} approved repair{{ summary.rows_repaired_approved|default:0|pluralize }} ·
-      {{ summary.rows_pending_repair }} pending repair{{ summary.rows_pending_repair|pluralize }} ·
       {{ summary.duplicate_skus|length }} duplicate SKU{{ summary.duplicate_skus|length|pluralize }} ·
       {{ errors|length }} error{{ errors|length|pluralize }}
     </div>
@@ -95,26 +92,6 @@
     </div>
   {% endif %}
 
-  {% if summary.rejected_preview %}
-    <details class="sth-details">
-      <summary>Initial rejected rows preview ({{ summary.rows_invalid }})</summary>
-      <div class="sth-source-table-wrap">
-        <table class="sth-source-table">
-          <thead><tr><th>Row</th><th>Columns</th><th>Reason</th></tr></thead>
-          <tbody>
-            {% for row in summary.rejected_preview %}
-              <tr>
-                <td>{{ row.source_row_number }}</td>
-                <td>{{ row.column_count|default:"—" }}</td>
-                <td>{{ row.validation_errors|join:"; " }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </details>
-  {% endif %}
-
   <details class="sth-details">
     <summary>Additional details</summary>
     <div class="sth-source-table-wrap">
@@ -124,18 +101,12 @@
           <tr><th>Expected filename</th><td>{{ summary.source_filename_expected|default:"—" }}</td></tr>
           <tr><th>Source method</th><td>{{ source_method }}</td></tr>
           <tr><th>Worksheet</th><td>{{ summary.worksheet|default:"—" }}</td></tr>
-          <tr><th>Encoding</th><td>{{ summary.encoding|default:"—" }}</td></tr>
           <tr><th>Header row</th><td>{{ summary.header_row|default:"—" }}</td></tr>
           <tr><th>Uploaded by</th><td>{{ uploaded_by|default:"—" }}</td></tr>
           <tr><th>Uploaded at</th><td>{{ uploaded_at|default:"—" }}</td></tr>
           <tr><th>Full SHA-256</th><td><code>{{ sha256|default:"—" }}</code></td></tr>
           <tr><th>Matched Django products</th><td>{{ summary.django_products_matched|default:0 }}</td></tr>
           {% if file_type == 'PRODUCTS' %}
-            <tr><th>Complete dimensions</th><td>{{ summary.dimensions_complete|default:0 }}</td></tr>
-            <tr><th>Zero/missing dimensions</th><td>{{ summary.dimensions_zero_or_missing|default:0 }}</td></tr>
-            <tr><th>Partial dimensions</th><td>{{ summary.dimensions_partial|default:0 }}</td></tr>
-            <tr><th>Matched and unchanged</th><td>{{ summary.django_products_unchanged|default:0 }}</td></tr>
-            <tr><th>Matched with differences</th><td>{{ summary.django_products_different|default:0 }}</td></tr>
             <tr><th>Source products not in Django</th><td>{{ summary.source_products_not_in_django|default:0 }}</td></tr>
             <tr><th>Django products missing from source</th><td>{{ summary.django_products_missing_from_source|default:0 }}</td></tr>
           {% else %}
