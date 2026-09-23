@@ -138,17 +138,23 @@ class Command(BaseCommand):
             sku = s(row[0] if len(row) > 0 else '')
             if not sku or sku.upper() == 'SKU':
                 continue
+            freight_type = s(row[9] if len(row) > 9 else 'P').upper()
+            if freight_type not in {'C', 'P'}:
+                freight_type = 'P'
             products.append(Product(
                 client=client,
                 sku=sku,
-                name=s(row[1] if len(row) > 1 else '') or sku,
-                description=s(row[2] if len(row) > 2 else ''),
+                # The legacy SKUs worksheet has dimensions in B:D, not Product
+                # name/description. Text is supplied by the validated Product
+                # source during reconciliation; never turn Length/Width into text.
+                name=sku,
+                description='',
                 length_m=d(row[4] if len(row) > 4 else 0),
                 width_m=d(row[5] if len(row) > 5 else 0),
                 height_m=d(row[6] if len(row) > 6 else 0),
                 weight_kg=d(row[7] if len(row) > 7 else 0),
                 cubic_m3=d(row[8] if len(row) > 8 else 0),
-                freight_type=(s(row[9] if len(row) > 9 else 'P') or 'P')[:1],
+                freight_type=freight_type,
                 source_row=idx,
                 active=True,
             ))

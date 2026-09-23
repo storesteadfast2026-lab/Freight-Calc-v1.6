@@ -26,6 +26,25 @@ OBJETIVO DE ESTA SESIÓN
 
 [ESCRIBIR AQUÍ EL CAMBIO, ERROR O FUNCIÓN QUE SE DESEA TRABAJAR]
 
+FORMATO DE ENTREGA DE ACTUALIZACIONES
+
+Cuando entregues cambios de código, genera un ZIP versionado `MMDD.HHMM` con
+esta estructura visible en la raíz: `01_Open_PowerShell_Here.bat`,
+`02_Apply_Update.bat`, `03_Rollback_Update.bat`, `Apply_Update.ps1`,
+`Rollback_Update.ps1`, `MANIFEST.csv`, `README_UPDATE_MMDD.HHMM.md` y `payload/`.
+El ejemplo visual compartido por el usuario muestra solo el formato de entrega;
+no es la última versión de la aplicación. Usa el ZIP o repositorio más reciente
+para preparar los archivos dentro de `payload/`, conservando las rutas relativas.
+Algunos documentos incluidos en un ZIP de revisión de IA pueden no existir en la
+carpeta operativa. En ese caso el instalador debe registrar su creación y el
+rollback debe eliminar solo el documento que creó, después de verificar su hash.
+El manifiesto debe identificar cada archivo y sus hashes SHA-256 original/nuevo.
+El instalador verifica esos hashes, hace respaldo y no sobrescribe archivos
+locales divergentes; el script de rollback restaura el respaldo después de
+comprobar que los archivos instalados no cambiaron. Incluye instrucciones
+PowerShell y pruebas en el README del paquete. No pidas copiar archivos sueltos
+manualmente ni reemplazar todo el proyecto por un snapshot anterior.
+
 No comiences modificando código. Primero confirma el estado relevante para esta
 tarea y la evidencia disponible.
 

@@ -1,0 +1,36 @@
+WORK.CALC - RECONCILIATION DECISION EXPORT SUMMARY
+====================================================================================================
+Source file: ID=11 / products.xls
+Operational Products: 229
+Source rows: 38596
+Matched Products: 229
+Decision records for source file: 232
+Decision SKUs indexed: 232
+Duplicate decision SKUs encountered: 0
+
+BULK SAFETY
+----------------------------------------------------------------------------------------------------
+SAFE_CANDIDATE: 229
+
+DECISION STATUS
+----------------------------------------------------------------------------------------------------
+APPLIED: 229
+
+GROUP KEYS
+----------------------------------------------------------------------------------------------------
+ 122  TEXT_ONLY
+  83  SOURCE_DIMENSIONS_ZERO
+  23  PHYSICAL_DIFFERENCES
+   1  DIMENSION_UNIT_REVIEW
+
+DRAFT DECISION SIGNATURES
+----------------------------------------------------------------------------------------------------
+ 229  name=SOURCE; description=SOURCE; dimensions=OPERATIONAL; weight=OPERATIONAL; cubic=OPERATIONAL; freight_type=SOURCE
+
+REVIEW SKUS
+----------------------------------------------------------------------------------------------------
+None
+
+NO DECISION RECORD SKUS
+----------------------------------------------------------------------------------------------------
+None

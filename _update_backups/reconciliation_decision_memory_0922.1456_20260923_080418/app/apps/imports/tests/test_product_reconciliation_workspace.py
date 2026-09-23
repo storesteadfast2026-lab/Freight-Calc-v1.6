@@ -1,0 +1,401 @@
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.urls import reverse
+from openpyxl import Workbook
+
+from apps.audit.models import AuditEvent
+from apps.clients.models import Client
+from apps.imports.models import (
+    ExternalDataFile,
+    ProductReconciliationDecision,
+    ProductReconciliationRule,
+    ProductSourceRow,
+)
+from apps.imports.management.commands.import_sth_excel import Command as ImportSthCommand
+from apps.imports.services.product_reconciliation_workspace import (
+    ProductReconciliationWorkspaceError,
+    build_workspace,
+    derive_freight_type_from_pallet,
+    preview_decision,
+    save_product_reconciliation_decisions,
+    save_reconciliation_rule,
+)
+from apps.imports.services.product_reconciliation_apply import (
+    ProductReconciliationApplyBlocked,
+    apply_product_reconciliation,
+    build_product_apply_plan,
+    create_recommended_product_drafts,
+    rollback_latest_product_apply,
+)
+from apps.products.models import Product
+from apps.saved_estimates.models import SavedEstimate
+
+
+class ProductReconciliationWorkspaceTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='reconciliation-admin',
+            password='password',
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client_obj = Client.objects.create(
+            code='STH',
+            name='Stenhoj Australia',
+            active=True,
+        )
+        self.external_file = ExternalDataFile.objects.create(
+            client=self.client_obj,
+            file_type='PRODUCTS',
+            source_method='ADMIN_UPLOAD',
+            original_filename='products.xls',
+            status='VALIDATED',
+            uploaded_by=self.user,
+        )
+        self.product = Product.objects.create(
+            client=self.client_obj,
+            sku='20772',
+            name='120',
+            description='80',
+            length_m=Decimal('1.2000'),
+            width_m=Decimal('0.8000'),
+            height_m=Decimal('0.3500'),
+            weight_kg=Decimal('70.0000'),
+            cubic_m3=Decimal('0.336000'),
+            freight_type='P',
+        )
+        ProductSourceRow.objects.create(
+            external_file=self.external_file,
+            source_row_number=6792,
+            product_code_raw='20772',
+            product_code_normalized='20772',
+            name='Wheel Sup OffRd 500mm Max875kg',
+            description='Wheel Support Device Offroad',
+            category='TEST',
+            length_mm=0,
+            width_mm=0,
+            height_mm=0,
+            weight_kg=Decimal('45.2'),
+            cubic_m3=Decimal('0.184'),
+            quantity=1,
+            pallet=1,
+            source_status='L',
+        )
+
+    def product_snapshot(self):
+        return list(Product.objects.order_by('pk').values())
+
+    def test_workspace_groups_source_zero_dimensions(self):
+        rows, summary = build_workspace(self.external_file)
+
+        self.assertEqual(rows[0]['group_key'], 'SOURCE_DIMENSIONS_ZERO')
+        self.assertEqual(summary['group_counts']['SOURCE_DIMENSIONS_ZERO'], 1)
+        self.assertEqual(summary['draft_decisions'], 0)
+
+    def test_case_pallet_rule_uses_zero_and_any_positive_number(self):
+        self.assertEqual(derive_freight_type_from_pallet(0), ('C', None))
+        self.assertEqual(derive_freight_type_from_pallet(1), ('P', None))
+        self.assertEqual(derive_freight_type_from_pallet(7), ('P', None))
+        self.assertEqual(
+            derive_freight_type_from_pallet(None),
+            (None, 'PALLET_VALUE_MISSING'),
+        )
+        self.assertEqual(
+            derive_freight_type_from_pallet(-1),
+            (None, 'PALLET_VALUE_NEGATIVE'),
+        )
+        self.assertEqual(
+            derive_freight_type_from_pallet('invalid'),
+            (None, 'PALLET_VALUE_INVALID'),
+        )
+
+    def test_invalid_pallet_requires_manual_freight_type(self):
+        source_row = ProductSourceRow.objects.get(external_file=self.external_file)
+        source_row.pallet = None
+        source_row.save(update_fields=['pallet'])
+
+        rows, summary = build_workspace(self.external_file)
+
+        self.assertTrue(rows[0]['freight_type_review_required'])
+        self.assertEqual(rows[0]['group_key'], 'FREIGHT_TYPE_REVIEW')
+        self.assertEqual(summary['freight_type_review_required'], 1)
+        with self.assertRaisesMessage(
+            ProductReconciliationWorkspaceError,
+            'Select C or P manually',
+        ):
+            save_product_reconciliation_decisions(
+                self.external_file,
+                skus=['20772'],
+                field_decisions={
+                    'name': 'OPERATIONAL',
+                    'description': 'OPERATIONAL',
+                    'dimensions': 'OPERATIONAL',
+                    'weight': 'OPERATIONAL',
+                    'cubic': 'OPERATIONAL',
+                    'freight_type': 'SOURCE',
+                },
+                actor=self.user,
+            )
+
+        decision = save_product_reconciliation_decisions(
+            self.external_file,
+            skus=['20772'],
+            field_decisions={
+                'name': 'OPERATIONAL',
+                'description': 'OPERATIONAL',
+                'dimensions': 'OPERATIONAL',
+                'weight': 'OPERATIONAL',
+                'cubic': 'OPERATIONAL',
+                'freight_type': 'CUSTOM',
+            },
+            custom_values={'freight_type': 'C'},
+            actor=self.user,
+        )[0]
+        self.assertEqual(preview_decision(rows[0], decision)['proposed_values']['freight_type'], 'C')
+
+    def test_bulk_draft_and_preview_do_not_change_product_or_freight_type(self):
+        before = self.product_snapshot()
+        decisions = save_product_reconciliation_decisions(
+            self.external_file,
+            skus=['20772'],
+            field_decisions={
+                'name': 'SOURCE',
+                'description': 'SOURCE',
+                'dimensions': 'OPERATIONAL',
+                'weight': 'OPERATIONAL',
+                'cubic': 'OPERATIONAL',
+            },
+            actor=self.user,
+        )
+        rows, summary = build_workspace(self.external_file)
+        preview = preview_decision(rows[0], decisions[0])
+
+        self.assertEqual(summary['draft_decisions'], 1)
+        self.assertEqual(preview['proposed_values']['name'], 'Wheel Sup OffRd 500mm Max875kg')
+        self.assertEqual(preview['proposed_values']['length_m'], Decimal('1.2000'))
+        self.assertEqual(preview['proposed_values']['freight_type'], 'P')
+        self.assertTrue(preview['operational_update_available'])
+        self.assertEqual(self.product_snapshot(), before)
+        self.assertTrue(AuditEvent.objects.filter(
+            event_type='PRODUCT_RECONCILIATION_DRAFT_SAVED'
+        ).exists())
+
+    def test_individual_custom_values_remain_draft_only(self):
+        before = self.product_snapshot()
+        decision = save_product_reconciliation_decisions(
+            self.external_file,
+            skus=['20772'],
+            field_decisions={
+                'name': 'CUSTOM',
+                'description': 'OPERATIONAL',
+                'dimensions': 'CUSTOM',
+                'weight': 'OPERATIONAL',
+                'cubic': 'CUSTOM',
+            },
+            custom_values={
+                'name': 'Reviewed wheel support',
+                'length_m': '1.25',
+                'width_m': '0.80',
+                'height_m': '0.35',
+                'cubic_m3': '0.350',
+            },
+            actor=self.user,
+        )[0]
+
+        self.assertEqual(decision.custom_values['name'], 'Reviewed wheel support')
+        self.assertEqual(decision.custom_values['length_m'], '1.25')
+        self.assertEqual(self.product_snapshot(), before)
+
+    def test_reusable_rule_is_saved_without_applying_operational_changes(self):
+        before = self.product_snapshot()
+        rule = save_reconciliation_rule(
+            self.external_file,
+            name='Keep Calculator when source dimensions are zero',
+            group_key='SOURCE_DIMENSIONS_ZERO',
+            field_decisions={
+                'name': 'SOURCE',
+                'description': 'SOURCE',
+                'dimensions': 'OPERATIONAL',
+                'weight': 'OPERATIONAL',
+                'cubic': 'OPERATIONAL',
+            },
+            actor=self.user,
+        )
+
+        self.assertTrue(rule.active)
+        self.assertEqual(ProductReconciliationRule.objects.count(), 1)
+        self.assertEqual(self.product_snapshot(), before)
+
+    def test_workspace_screen_saves_selected_bulk_draft(self):
+        before = self.product_snapshot()
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_product_reconciliation',
+            args=[self.external_file.pk],
+        )
+
+        response = self.client.post(url, {
+            'workspace_action': 'save_bulk',
+            'group': 'SOURCE_DIMENSIONS_ZERO',
+            'selected_skus': ['20772'],
+            'preset': 'KEEP_PHYSICAL_USE_SOURCE_TEXT',
+            'scope': 'selected',
+            'notes': 'Reviewed as a group.',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        decision = ProductReconciliationDecision.objects.get(
+            external_file=self.external_file,
+            product_code_normalized='20772',
+        )
+        self.assertEqual(decision.field_decisions['dimensions'], 'OPERATIONAL')
+        self.assertEqual(self.product_snapshot(), before)
+
+        response = self.client.get(f'{url}?group=SOURCE_DIMENSIONS_ZERO&mode=preview')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Preview draft decisions')
+        self.assertContains(response, 'C/P proposal')
+        self.assertContains(response, '0 → C')
+        self.assertContains(response, 'Apply 1 reviewed change(s)')
+
+    def test_recommended_correction_applies_source_text_and_protected_cp_then_rolls_back(self):
+        old_name = self.product.name
+        old_description = self.product.description
+        old_weight = self.product.weight_kg
+
+        decisions = create_recommended_product_drafts(
+            self.external_file,
+            actor=self.user,
+        )
+        self.assertEqual(len(decisions), 1)
+        plan = build_product_apply_plan(self.external_file.pk)
+        self.assertTrue(plan['can_apply'])
+        self.assertEqual(plan['update_count'], 1)
+
+        batch = apply_product_reconciliation(self.external_file.pk, actor=self.user)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, 'Wheel Sup OffRd 500mm Max875kg')
+        self.assertEqual(self.product.description, 'Wheel Support Device Offroad')
+        self.assertEqual(self.product.weight_kg, old_weight)
+        self.assertEqual(self.product.freight_type, 'P')
+        self.assertTrue(batch['batch_id'])
+        self.assertTrue(AuditEvent.objects.filter(
+            event_type='PRODUCT_RECONCILIATION_APPLIED'
+        ).exists())
+
+        rollback_latest_product_apply(self.external_file.pk, actor=self.user)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, old_name)
+        self.assertEqual(self.product.description, old_description)
+        self.assertTrue(AuditEvent.objects.filter(
+            event_type='PRODUCT_RECONCILIATION_ROLLED_BACK'
+        ).exists())
+
+    def test_operational_only_removal_is_blocked_when_saved_quote_references_sku(self):
+        ProductSourceRow.objects.filter(external_file=self.external_file).delete()
+        SavedEstimate.objects.create(
+            reference='FQ-STH-TEST-1',
+            client=self.client_obj,
+            created_by=self.user,
+            created_by_label='tester',
+            input_snapshot={'lines': [{'sku': '20772'}]},
+            result_snapshot=[],
+        )
+        create_recommended_product_drafts(self.external_file, actor=self.user)
+        plan = build_product_apply_plan(self.external_file.pk)
+
+        self.assertFalse(plan['can_apply'])
+        self.assertEqual(plan['delete_count'], 1)
+        self.assertEqual(plan['items'][0]['reference_summary']['saved_estimates'], 1)
+        with self.assertRaises(ProductReconciliationApplyBlocked):
+            apply_product_reconciliation(self.external_file.pk, actor=self.user)
+        self.assertTrue(Product.objects.filter(pk=self.product.pk).exists())
+
+    def test_operational_only_unreferenced_product_is_removed_and_restored(self):
+        ProductSourceRow.objects.filter(external_file=self.external_file).delete()
+        create_recommended_product_drafts(self.external_file, actor=self.user)
+
+        plan = build_product_apply_plan(self.external_file.pk)
+        self.assertTrue(plan['can_apply'])
+        self.assertEqual(plan['delete_count'], 1)
+        apply_product_reconciliation(self.external_file.pk, actor=self.user)
+        self.assertFalse(Product.objects.filter(pk=self.product.pk).exists())
+
+        rollback_latest_product_apply(self.external_file.pk, actor=self.user)
+        restored = Product.objects.get(pk=self.product.pk)
+        self.assertEqual(restored.sku, '20772')
+        self.assertEqual(restored.name, '120')
+
+    def test_dimension_scale_warning_blocks_source_dimension_apply(self):
+        source = ProductSourceRow.objects.get(external_file=self.external_file)
+        source.length_mm = Decimal('120')
+        source.width_mm = Decimal('80')
+        source.height_mm = Decimal('35')
+        source.save(update_fields=['length_mm', 'width_mm', 'height_mm'])
+        rows, summary = build_workspace(self.external_file)
+
+        self.assertTrue(rows[0]['dimension_unit_review_required'])
+        self.assertEqual(summary['group_counts']['DIMENSION_UNIT_REVIEW'], 1)
+        save_product_reconciliation_decisions(
+            self.external_file,
+            skus=['20772'],
+            field_decisions={
+                'name': 'SOURCE',
+                'description': 'SOURCE',
+                'dimensions': 'SOURCE',
+                'weight': 'OPERATIONAL',
+                'cubic': 'OPERATIONAL',
+                'freight_type': 'SOURCE',
+            },
+            actor=self.user,
+        )
+        plan = build_product_apply_plan(self.external_file.pk)
+        self.assertFalse(plan['can_apply'])
+        self.assertIn('manual unit review', plan['blockers'][0])
+
+    def test_cp_difference_count_is_transversal_to_physical_group(self):
+        self.product.freight_type = 'C'
+        self.product.save(update_fields=['freight_type'])
+        rows, summary = build_workspace(self.external_file)
+
+        self.assertEqual(rows[0]['group_key'], 'SOURCE_DIMENSIONS_ZERO')
+        self.assertEqual(summary['group_counts']['FREIGHT_TYPE_DIFFERENCES'], 1)
+
+    def test_legacy_workbook_bootstrap_never_maps_dimensions_to_product_text(self):
+        Product.objects.all().delete()
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'SKUs'
+        worksheet.append([
+            'SKU', 'Length (cm)', 'Width (cm)', 'Height (cm)',
+            'Length (m)', 'Width (m)', 'Height (m)', 'Weight', 'Cubic', 'Type',
+        ])
+        worksheet.append([
+            'SKU-BOOT', 120, 80, 35, 1.2, 0.8, 0.35, 70, 0.336, 'P',
+        ])
+
+        ImportSthCommand().import_products(workbook, self.client_obj)
+        product = Product.objects.get(sku='SKU-BOOT')
+        self.assertEqual(product.name, 'SKU-BOOT')
+        self.assertEqual(product.description, '')
+
+    def test_edit_action_is_visible_beside_sku_and_targets_editor(self):
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_product_reconciliation',
+            args=[self.external_file.pk],
+        )
+
+        response = self.client.get(f'{url}?group=SOURCE_DIMENSIONS_ZERO')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Edit product')
+        self.assertContains(response, '#individual-editor')
+
+        response = self.client.get(
+            f'{url}?group=SOURCE_DIMENSIONS_ZERO&edit=20772'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="individual-editor"', html=False)
+        self.assertContains(response, 'Individual review · 20772')

@@ -1,0 +1,505 @@
+from pathlib import Path
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+
+from apps.clients.models import Client
+
+
+def external_data_upload_to(instance, filename):
+    """Build a stable, versioned path for uploaded/downloaded source files."""
+    timestamp = timezone.localtime().strftime('%Y%m%d_%H%M%S')
+    safe_name = Path(filename).name.replace(' ', '_')
+    client_code = getattr(instance.client, 'code', 'unknown').lower()
+    file_type = (instance.file_type or 'other').lower()
+    return f'external_imports/{client_code}/{file_type}/{timezone.localdate():%Y/%m}/{timestamp}_{safe_name}'
+
+
+class ExternalDataFile(models.Model):
+    """Uploaded or downloaded external source with validation/import history."""
+
+    FILE_TYPES = [
+        ('PRODUCTS', 'Products'),
+        ('STOCK', 'Stock'),
+        ('FUEL', 'Fuel'),
+        ('ZONES', 'Zones'),
+        ('RATES', 'Rates'),
+        ('SUBURBS', 'Suburbs'),
+        ('WORKBOOK', 'Full Excel Workbook'),
+    ]
+    SOURCE_METHODS = [
+        ('ADMIN_UPLOAD', 'Admin upload'),
+        ('ADMIN_WEB_FETCH', 'Admin web fetch'),
+        ('FTP_DROP', 'FTP uploaded_data drop'),
+        ('COMMAND', 'Management command'),
+    ]
+    STATUSES = [
+        ('UPLOADED', 'Uploaded'),
+        ('DOWNLOADED', 'Downloaded'),
+        ('VALIDATED', 'Validated'),
+        ('VALIDATION_FAILED', 'Validation failed'),
+        ('ACTIVE', 'Active'),
+        ('IMPORT_FAILED', 'Import failed'),
+        ('ROLLED_BACK', 'Rolled back'),
+        ('IMPORTED', 'Imported'),
+        ('ERROR', 'Error'),
+        ('ARCHIVED', 'Archived'),
+    ]
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name='external_files')
+    file_type = models.CharField(max_length=30, choices=FILE_TYPES)
+    source_method = models.CharField(max_length=30, choices=SOURCE_METHODS, default='ADMIN_UPLOAD')
+    source_url = models.URLField(max_length=1000, blank=True)
+    original_filename = models.CharField(max_length=255)
+    uploaded_file = models.FileField(upload_to=external_data_upload_to, null=True, blank=True)
+    # Kept for backwards compatibility with command-created workbook records.
+    stored_path = models.CharField(max_length=500, blank=True, default='')
+    file_size_bytes = models.PositiveBigIntegerField(default=0)
+    mime_type = models.CharField(max_length=120, blank=True)
+    sha256 = models.CharField(max_length=64, blank=True, db_index=True)
+    notes = models.TextField(blank=True)
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_files_uploaded',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=30, choices=STATUSES, default='UPLOADED', db_index=True)
+
+    validation_summary = models.JSONField(default=dict, blank=True)
+    validated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_files_validated',
+    )
+    validated_at = models.DateTimeField(null=True, blank=True)
+
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_files_imported',
+    )
+    last_imported_at = models.DateTimeField(null=True, blank=True)
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_files_activated',
+    )
+    activated_at = models.DateTimeField(null=True, blank=True)
+    rolled_back_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_files_rolled_back',
+    )
+    rolled_back_at = models.DateTimeField(null=True, blank=True)
+    previous_active_file = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='replacement_files',
+    )
+
+    import_summary = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        permissions = [
+            ('validate_external_data_file', 'Can validate external data files'),
+            ('activate_fuel', 'Can activate fuel rates'),
+            ('rollback_fuel', 'Can rollback fuel rates'),
+            ('download_external_data_file', 'Can download external data files'),
+        ]
+
+    def __str__(self):
+        return f'{self.client.code} {self.file_type} {self.original_filename}'
+
+    @property
+    def local_path(self):
+        if self.uploaded_file:
+            try:
+                return self.uploaded_file.path
+            except (NotImplementedError, ValueError):
+                return ''
+        return self.stored_path
+
+
+class ProductSourceRow(models.Model):
+    """Read-only valid staging row loaded from a Product source file."""
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='product_source_rows',
+        limit_choices_to={'file_type': 'PRODUCTS'},
+    )
+    source_row_number = models.PositiveIntegerField()
+    product_code_raw = models.CharField(max_length=255)
+    product_code_normalized = models.CharField(max_length=255, db_index=True)
+    name = models.CharField(max_length=500, blank=True)
+    description = models.TextField(blank=True)
+    category = models.CharField(max_length=255, blank=True)
+    length_mm = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    width_mm = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    height_mm = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    cubic_m3 = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    quantity = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    weight_kg = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    pallet = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    comment = models.TextField(blank=True)
+    source_status = models.CharField(max_length=100, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
+    validation_errors = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['source_row_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'source_row_number'],
+                name='imports_product_source_file_row_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['external_file', 'product_code_normalized'], name='imp_prod_file_sku_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.source_row_number} {self.product_code_normalized}'
+
+
+class ProductSourceRejectedRow(models.Model):
+    """Product source row isolated because it cannot be mapped safely."""
+
+    REPAIR_STATUSES = [
+        ('PENDING', 'Pending review'),
+        ('PROPOSED', 'Proposal saved'),
+        ('APPROVED', 'Approved into staging'),
+    ]
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='product_rejected_rows',
+        limit_choices_to={'file_type': 'PRODUCTS'},
+    )
+    source_row_number = models.PositiveIntegerField()
+    column_count = models.PositiveIntegerField(null=True, blank=True)
+    raw_values = models.JSONField(default=list, blank=True)
+    validation_errors = models.JSONField(default=list, blank=True)
+    repair_status = models.CharField(
+        max_length=20,
+        choices=REPAIR_STATUSES,
+        default='PENDING',
+        db_index=True,
+    )
+    proposed_data = models.JSONField(default=dict, blank=True)
+    review_note = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='reviewed_product_source_rejections',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    staged_row = models.OneToOneField(
+        ProductSourceRow,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='approved_repair',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['source_row_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'source_row_number'],
+                name='imports_product_rejected_file_row_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.source_row_number} rejected'
+
+
+class ProductReconciliationDecision(models.Model):
+    """Draft field-level decision for one Product reconciliation row."""
+
+    DECISION_STATUSES = [
+        ('DRAFT', 'Draft'),
+        ('READY', 'Ready for preview'),
+        ('APPLIED', 'Applied'),
+    ]
+    ROW_ACTIONS = [
+        ('UPDATE', 'Update operational Product'),
+        ('DELETE', 'Remove operational Product'),
+    ]
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='product_reconciliation_decisions',
+        limit_choices_to={'file_type': 'PRODUCTS'},
+    )
+    product_code_normalized = models.CharField(max_length=255, db_index=True)
+    source_row_number = models.PositiveIntegerField(null=True, blank=True)
+    row_status = models.CharField(max_length=30)
+    group_key = models.CharField(max_length=80, db_index=True)
+    field_decisions = models.JSONField(default=dict)
+    custom_values = models.JSONField(default=dict, blank=True)
+    row_action = models.CharField(
+        max_length=12,
+        choices=ROW_ACTIONS,
+        default='UPDATE',
+    )
+    decision_status = models.CharField(
+        max_length=20,
+        choices=DECISION_STATUSES,
+        default='DRAFT',
+        db_index=True,
+    )
+    notes = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='product_reconciliation_decisions',
+    )
+    reviewed_at = models.DateTimeField(auto_now=True)
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='applied_product_reconciliation_decisions',
+    )
+    applied_at = models.DateTimeField(null=True, blank=True)
+    apply_batch_id = models.CharField(max_length=32, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['external_file', 'product_code_normalized']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'product_code_normalized'],
+                name='imp_prod_recon_file_sku_uniq',
+            ),
+        ]
+        permissions = [
+            ('manage_product_reconciliation', 'Can manage Product reconciliation drafts'),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.product_code_normalized} {self.decision_status}'
+
+
+class ProductReconciliationRule(models.Model):
+    """Reusable group-level proposal for future Product source files."""
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name='product_reconciliation_rules',
+    )
+    name = models.CharField(max_length=160)
+    group_key = models.CharField(max_length=80, db_index=True)
+    field_decisions = models.JSONField(default=dict)
+    notes = models.TextField(blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_product_reconciliation_rules',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['client', 'group_key', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['client', 'name'],
+                name='imp_prod_recon_rule_client_name_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.client.code}:{self.name}'
+
+
+class ExternalDataCorrectionMemory(models.Model):
+    """Reusable, audited correction approved for an external-data workflow."""
+
+    workflow_key = models.CharField(max_length=80, db_index=True)
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name='external_data_correction_memories',
+    )
+    record_key = models.CharField(max_length=255, blank=True, db_index=True)
+    source_fingerprint = models.CharField(max_length=64, db_index=True)
+    proposal_fingerprint = models.CharField(max_length=64, db_index=True)
+    source_data = models.JSONField(default=dict, blank=True)
+    approved_data = models.JSONField(default=dict, blank=True)
+    approval_note = models.TextField(blank=True)
+    origin_external_file = models.ForeignKey(
+        ExternalDataFile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='originated_correction_memories',
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='approved_external_data_corrections',
+    )
+    approved_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    use_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ['workflow_key', 'record_key', '-approved_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workflow_key', 'client', 'source_fingerprint'],
+                name='imp_corrmem_source_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['workflow_key', 'client', 'record_key', 'is_active'],
+                name='imp_corrmem_lookup_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.workflow_key}:{self.client_id}:{self.record_key}'
+
+
+class StockSourceRow(models.Model):
+    """Read-only staging row loaded from stock_sth.xlsx."""
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='stock_source_rows',
+        limit_choices_to={'file_type': 'STOCK'},
+    )
+    source_row_number = models.PositiveIntegerField()
+    movement_number = models.CharField(max_length=100, blank=True)
+    stock_date_raw = models.CharField(max_length=100, blank=True)
+    customer = models.CharField(max_length=100, blank=True)
+    product_code_raw = models.CharField(max_length=255)
+    product_code_normalized = models.CharField(max_length=255, db_index=True)
+    sql_name = models.CharField(max_length=500, blank=True)
+    quantity = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    pallet = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    group1 = models.CharField(max_length=255, blank=True)
+    location = models.CharField(max_length=255, blank=True)
+    stock_class = models.CharField(max_length=255, blank=True)
+    sql_stock_ref = models.CharField(max_length=255, blank=True)
+    weight_kg = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    cubic_m3 = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    depot = models.CharField(max_length=255, blank=True)
+    sql_group = models.CharField(max_length=255, blank=True)
+    sql_group1 = models.CharField(max_length=255, blank=True)
+    expiry_raw = models.CharField(max_length=100, blank=True)
+    pallet_ref = models.CharField(max_length=255, blank=True)
+    serial_no = models.CharField(max_length=255, blank=True)
+    source_status = models.CharField(max_length=100, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
+    validation_errors = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['source_row_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'source_row_number'],
+                name='imports_stock_source_file_row_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['external_file', 'product_code_normalized'], name='imp_stock_file_sku_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.source_row_number} {self.product_code_normalized}'
+
+
+class ExternalDataReviewItem(models.Model):
+    """Generic review decision linked to one external source row."""
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='external_data_review_items',
+    )
+    row_key = models.CharField(max_length=255)
+    entity_type = models.CharField(max_length=50, blank=True)
+    source_data = models.JSONField(default=dict, blank=True)
+    current_data = models.JSONField(default=dict, blank=True)
+    diagnostic_data = models.JSONField(default=dict, blank=True)
+    proposed_action = models.CharField(max_length=50, blank=True)
+    decision = models.CharField(max_length=50, default='PENDING')
+    notes = models.TextField(blank=True)
+    corrected_suburb = models.CharField(max_length=120, blank=True)
+    corrected_state = models.CharField(max_length=10, blank=True)
+    corrected_postcode = models.CharField(max_length=10, blank=True)
+    selected_historical_suburb_id = models.BigIntegerField(null=True, blank=True)
+    is_current = models.BooleanField(default=True, db_index=True)
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='external_data_reviews',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    applied_result = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['external_file', 'row_key']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'row_key'],
+                name='imports_review_file_row_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['external_file', 'decision', 'is_current'],
+                name='imp_review_file_dec_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.row_key} {self.decision}'

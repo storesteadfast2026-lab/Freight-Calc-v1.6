@@ -238,6 +238,207 @@ class ProductSourceRejectedRow(models.Model):
         return f'{self.external_file_id}:{self.source_row_number} rejected'
 
 
+class ProductReconciliationDecision(models.Model):
+    """Draft field-level decision for one Product reconciliation row."""
+
+    DECISION_STATUSES = [
+        ('DRAFT', 'Draft'),
+        ('READY', 'Ready for preview'),
+        ('APPLIED', 'Applied'),
+    ]
+    ROW_ACTIONS = [
+        ('UPDATE', 'Update operational Product'),
+        ('DELETE', 'Remove operational Product'),
+    ]
+
+    external_file = models.ForeignKey(
+        ExternalDataFile,
+        on_delete=models.CASCADE,
+        related_name='product_reconciliation_decisions',
+        limit_choices_to={'file_type': 'PRODUCTS'},
+    )
+    product_code_normalized = models.CharField(max_length=255, db_index=True)
+    source_row_number = models.PositiveIntegerField(null=True, blank=True)
+    row_status = models.CharField(max_length=30)
+    group_key = models.CharField(max_length=80, db_index=True)
+    field_decisions = models.JSONField(default=dict)
+    custom_values = models.JSONField(default=dict, blank=True)
+    row_action = models.CharField(
+        max_length=12,
+        choices=ROW_ACTIONS,
+        default='UPDATE',
+    )
+    decision_status = models.CharField(
+        max_length=20,
+        choices=DECISION_STATUSES,
+        default='DRAFT',
+        db_index=True,
+    )
+    notes = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='product_reconciliation_decisions',
+    )
+    reviewed_at = models.DateTimeField(auto_now=True)
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='applied_product_reconciliation_decisions',
+    )
+    applied_at = models.DateTimeField(null=True, blank=True)
+    apply_batch_id = models.CharField(max_length=32, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['external_file', 'product_code_normalized']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_file', 'product_code_normalized'],
+                name='imp_prod_recon_file_sku_uniq',
+            ),
+        ]
+        permissions = [
+            ('manage_product_reconciliation', 'Can manage Product reconciliation drafts'),
+        ]
+
+    def __str__(self):
+        return f'{self.external_file_id}:{self.product_code_normalized} {self.decision_status}'
+
+
+class ProductCorrectionRound(models.Model):
+    """A later, independent set of decisions against the same immutable source."""
+
+    external_file = models.ForeignKey(
+        ExternalDataFile, on_delete=models.PROTECT, related_name='product_correction_rounds'
+    )
+    status = models.CharField(max_length=16, default='DRAFT')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    apply_batch_id = models.CharField(max_length=32, blank=True)
+
+
+class ProductCorrectionDecision(models.Model):
+    """Retained per-round decision; prior applied decisions remain untouched."""
+
+    round = models.ForeignKey(
+        ProductCorrectionRound, on_delete=models.PROTECT, related_name='decisions'
+    )
+    sku = models.CharField(max_length=255)
+    field_decisions = models.JSONField(default=dict)
+    custom_values = models.JSONField(default=dict, blank=True)
+    notes = models.TextField()
+    confirm_source_dimensions = models.BooleanField(default=False)
+    source_fingerprint = models.CharField(max_length=64)
+    before_values = models.JSONField(default=dict)
+    after_values = models.JSONField(default=dict, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    reviewed_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def row_action(self):
+        return 'UPDATE'
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['round', 'sku'], name='imp_product_corr_round_sku_uniq'),
+        ]
+
+
+class ProductReconciliationRule(models.Model):
+    """Reusable group-level proposal for future Product source files."""
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name='product_reconciliation_rules',
+    )
+    name = models.CharField(max_length=160)
+    group_key = models.CharField(max_length=80, db_index=True)
+    field_decisions = models.JSONField(default=dict)
+    notes = models.TextField(blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_product_reconciliation_rules',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['client', 'group_key', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['client', 'name'],
+                name='imp_prod_recon_rule_client_name_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.client.code}:{self.name}'
+
+
+class ExternalDataCorrectionMemory(models.Model):
+    """Reusable, audited correction approved for an external-data workflow."""
+
+    workflow_key = models.CharField(max_length=80, db_index=True)
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name='external_data_correction_memories',
+    )
+    record_key = models.CharField(max_length=255, blank=True, db_index=True)
+    source_fingerprint = models.CharField(max_length=64, db_index=True)
+    proposal_fingerprint = models.CharField(max_length=64, db_index=True)
+    source_data = models.JSONField(default=dict, blank=True)
+    approved_data = models.JSONField(default=dict, blank=True)
+    approval_note = models.TextField(blank=True)
+    origin_external_file = models.ForeignKey(
+        ExternalDataFile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='originated_correction_memories',
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='approved_external_data_corrections',
+    )
+    approved_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    use_count = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ['workflow_key', 'record_key', '-approved_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workflow_key', 'client', 'source_fingerprint'],
+                name='imp_corrmem_source_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['workflow_key', 'client', 'record_key', 'is_active'],
+                name='imp_corrmem_lookup_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.workflow_key}:{self.client_id}:{self.record_key}'
+
+
 class StockSourceRow(models.Model):
     """Read-only staging row loaded from stock_sth.xlsx."""
 

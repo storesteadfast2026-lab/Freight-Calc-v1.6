@@ -16,7 +16,7 @@ from apps.imports.services.audit import create_audit_event
 
 DEFAULT_FTP_FILE_MAP = {
     'postcodes.csv': 'SUBURBS',
-    'products.csv': 'PRODUCTS',
+    'products.xls': 'PRODUCTS',
     'fuel.csv': 'FUEL',
     'zones.csv': 'ZONES',
     'stock.csv': 'STOCK',

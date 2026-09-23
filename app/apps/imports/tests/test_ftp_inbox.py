@@ -36,7 +36,7 @@ class FtpInboxTests(TestCase):
         (self.root / filename).write_bytes(content)
 
     def test_inspection_is_read_only(self):
-        self._write('products.csv', b'sku,name\nA1,Test\n')
+        self._write('products.xls', b'legacy-xls-snapshot')
         before = ExternalDataFile.objects.count()
         result = inspect_ftp_inbox()
         self.assertTrue(result['root_exists'])
@@ -45,7 +45,7 @@ class FtpInboxTests(TestCase):
         self.assertEqual(ExternalDataFile.objects.count(), before)
 
     def test_scan_registers_known_files_without_operational_import(self):
-        self._write('products.csv', b'sku,name\nA1,Test\n')
+        self._write('products.xls', b'legacy-xls-snapshot')
         self._write('postcodes.csv', b'index,suburb,state,postcode\n1,TEST,SA,5000\n')
         suburb_before = Suburb.objects.count()
 
@@ -110,7 +110,7 @@ class FtpInboxTests(TestCase):
         self.assertEqual(result['ignored'], 1)
 
     def test_scan_creates_audit_events(self):
-        self._write('products.csv', b'sku,name\nA1,Test\n')
+        self._write('products.xls', b'legacy-xls-snapshot')
         scan_ftp_inbox(client=self.client_obj)
         self.assertTrue(
             AuditEvent.objects.filter(
@@ -126,13 +126,13 @@ class FtpInboxTests(TestCase):
         )
 
     def test_scan_returns_visual_feedback_metadata(self):
-        self._write('products.csv', b'sku,name\nA1,Test\n')
+        self._write('products.xls', b'legacy-xls-snapshot')
         result = scan_ftp_inbox(client=self.client_obj)
 
         self.assertTrue(result['checked_at_display'])
         self.assertEqual(len(result['files']), 1)
         item = result['files'][0]
-        self.assertEqual(item['filename'], 'products.csv')
+        self.assertEqual(item['filename'], 'products.xls')
         self.assertEqual(item['result_label'], 'NEW VERSION')
         self.assertTrue(item['sha_checked'])
         self.assertTrue(item['source_modified_at_display'])

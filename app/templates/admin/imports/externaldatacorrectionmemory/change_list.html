@@ -1,0 +1,10 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+  <li>
+    <a href="{% url 'admin:imports_externaldatacorrectionmemory_download_excel' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">
+      Download visible memory Excel
+    </a>
+  </li>
+  {{ block.super }}
+{% endblock %}

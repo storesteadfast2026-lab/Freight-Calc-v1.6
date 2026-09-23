@@ -43,6 +43,11 @@ STANDARD_PERMISSION_TARGETS = {
             'download_external_data_file',
         },
         'productsourcerow': {'view'},
+        'productreconciliationdecision': {
+            'view',
+            'manage_product_reconciliation',
+        },
+        'productreconciliationrule': {'view', 'change'},
         'stocksourcerow': {'view'},
     },
     'audit': {

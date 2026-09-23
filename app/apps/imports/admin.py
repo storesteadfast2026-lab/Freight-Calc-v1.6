@@ -19,22 +19,31 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from apps.clients.models import Client
+from apps.imports.admin_bulk_review import ProductRejectedRowsBulkReview
+from apps.imports.admin_reconciliation import ProductReconciliationWorkflow
 from apps.imports.admin_ftp_inbox import FtpInboxAdminMixin
 from apps.imports.forms import (
     ExternalDataFileAdminForm,
     FetchFuelForm,
     FuelActivationForm,
     FuelRollbackForm,
+    ProductSourceRejectedRowReviewForm,
     SourceUploadForm,
 )
 from apps.imports.models import (
+    ExternalDataCorrectionMemory,
     ExternalDataFile,
     ExternalDataReviewItem,
+    ProductReconciliationDecision,
+    ProductReconciliationRule,
     ProductSourceRejectedRow,
     ProductSourceRow,
     StockSourceRow,
 )
 from apps.imports.services.audit import create_audit_event
+from apps.imports.services.correction_memory_export import (
+    correction_memory_export_response,
+)
 from apps.imports.services.fuel import (
     FuelImportError,
     activate_fuel_file,
@@ -50,85 +59,17 @@ from apps.imports.services.product_source import (
     build_product_source_validation_report,
     validate_product_source_file,
 )
+from apps.imports.services.product_file_adapters import PRODUCT_SOURCE_EXTENSIONS
 from apps.imports.services.product_repair import (
     ProductRepairError,
     approve_product_source_repair,
-    build_product_repair_proposal,
     save_product_repair_proposal,
 )
 from apps.imports.services.stock_source import validate_stock_source_file
-from apps.imports.services.xlsx_reader import SourceImportError, normalize_product_sku
+from apps.imports.services.xlsx_reader import SourceImportError
 
 
 REFERENCE_FILE_TYPES = {'PRODUCTS', 'STOCK'}
-
-
-class ProductSourceRejectedRowReviewForm(forms.ModelForm):
-    code = forms.CharField(label='Product code', max_length=255)
-    name = forms.CharField(max_length=500, required=False)
-    description = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
-    category = forms.CharField(max_length=255, required=False)
-    length_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    width_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    height_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    cubic_m3 = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    quantity = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    weight_kg = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    pallet = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
-    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
-    source_status = forms.CharField(label='Source status', max_length=100, required=False)
-
-    class Meta:
-        model = ProductSourceRejectedRow
-        fields = ('review_note',)
-        widgets = {'review_note': forms.Textarea(attrs={'rows': 3})}
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        proposal = dict(self.instance.proposed_data or {})
-        if not proposal:
-            proposal = build_product_repair_proposal(self.instance.raw_values or [])
-        for field_name in (
-            'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
-            'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
-            'source_status',
-        ):
-            if field_name not in self.initial:
-                self.fields[field_name].initial = proposal.get(field_name, '')
-        if self.instance.repair_status == 'APPROVED':
-            for field in self.fields.values():
-                field.disabled = True
-
-    def clean(self):
-        cleaned = super().clean()
-        approving = '_approve_repair' in self.data
-        if approving and self.instance.repair_status == 'APPROVED':
-            raise forms.ValidationError('This repair is already approved and cannot be changed.')
-        if approving and not str(cleaned.get('review_note') or '').strip():
-            self.add_error('review_note', 'A review note is required for approval.')
-        if approving:
-            code = normalize_product_sku(cleaned.get('code'))
-            if not code:
-                self.add_error('code', 'Product code is required.')
-            elif ProductSourceRow.objects.filter(
-                external_file=self.instance.external_file,
-                product_code_normalized=code,
-            ).exists():
-                self.add_error(
-                    'code',
-                    f'Product code {code} already exists in valid staging for this file.',
-                )
-        return cleaned
-
-    def repair_payload(self):
-        return {
-            field_name: self.cleaned_data.get(field_name)
-            for field_name in (
-                'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
-                'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
-                'source_status',
-            )
-        }
 
 
 
@@ -662,6 +603,21 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                 name='imports_externaldatafile_validate_source',
             ),
             path(
+                '<int:object_id>/review-product-rejections/',
+                self.admin_site.admin_view(self.review_product_rejections_view),
+                name='imports_externaldatafile_review_product_rejections',
+            ),
+            path(
+                '<int:object_id>/product-reconciliation/',
+                self.admin_site.admin_view(self.product_reconciliation_view),
+                name='imports_externaldatafile_product_reconciliation',
+            ),
+            path(
+                '<int:object_id>/download-product-memory/',
+                self.admin_site.admin_view(self.download_product_memory_view),
+                name='imports_externaldatafile_download_product_memory',
+            ),
+            path(
                 '<int:object_id>/validate-fuel/',
                 self.admin_site.admin_view(self.validate_fuel_view),
                 name='imports_externaldatafile_validate_fuel',
@@ -689,6 +645,56 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
         ]
         return custom_urls + super().get_urls()
 
+    def review_product_rejections_view(self, request, object_id):
+        workflow = ProductRejectedRowsBulkReview(self.admin_site)
+        return workflow(request, object_id)
+
+    def product_reconciliation_view(self, request, object_id):
+        workflow = ProductReconciliationWorkflow(self.admin_site)
+        return workflow(request, object_id)
+
+    def download_product_memory_view(self, request, object_id):
+        if not (
+            request.user.is_superuser
+            or request.user.has_perm('imports.manage_product_reconciliation')
+        ):
+            raise PermissionDenied('Missing Product reconciliation permission.')
+        obj = get_object_or_404(
+            ExternalDataFile,
+            pk=object_id,
+            file_type='PRODUCTS',
+            status='VALIDATED',
+        )
+        memories = ExternalDataCorrectionMemory.objects.filter(
+            workflow_key='PRODUCT_RECONCILIATION',
+            client=obj.client,
+        )
+        response, record_count, part_count = correction_memory_export_response(
+            memories,
+            filename_prefix=f'product_reconciliation_memory_{obj.client.code}',
+            scope_label=(
+                f'All Product reconciliation memories for client {obj.client.code}'
+            ),
+        )
+        create_audit_event(
+            event_type='PRODUCT_RECONCILIATION_MEMORY_EXPORTED',
+            message=(
+                f'{record_count} Product reconciliation memory record(s) exported '
+                f'in {part_count} Excel file(s).'
+            ),
+            actor=request.user,
+            client=obj.client,
+            external_file=obj,
+            metadata={
+                'record_count': record_count,
+                'part_count': part_count,
+                'format': 'XLSX',
+                'operational_tables_updated': False,
+            },
+            request=request,
+        )
+        return response
+
     def get_readonly_fields(self, request, obj=None):
         system_fields = (
             'source_method', 'source_url', 'original_filename', 'stored_path',
@@ -708,7 +714,8 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                 ('Manual external source upload', {
                     'fields': ('client', 'file_type', 'uploaded_file', 'notes'),
                     'description': (
-                        'Fuel accepts .csv. Product accepts products.csv (or legacy .xlsx); '
+                        'Fuel accepts .csv. Product uses products.xls; compatible Product '
+                        'readers also remain available for .csv and .xlsx. '
                         'stock accepts .xlsx. '
                         'Product/stock uploads do not change operational data.'
                     ),
@@ -1063,6 +1070,13 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                 links.append(format_html('<a href="{}">View rows</a>', row_url))
                 if obj.file_type == 'PRODUCTS':
                     links.append(format_html(
+                        '<a href="{}">Product reconciliation workspace</a>',
+                        reverse(
+                            'admin:imports_externaldatafile_product_reconciliation',
+                            args=[obj.pk],
+                        ),
+                    ))
+                    links.append(format_html(
                         '<a href="{}">Download validation report</a>',
                         reverse(
                             'admin:imports_externaldatafile_download_product_validation_report',
@@ -1071,11 +1085,8 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                     ))
                     if int((obj.validation_summary or {}).get('rows_invalid') or 0):
                         rejected_url = reverse(
-                            'admin:imports_productsourcerejectedrow_changelist'
-                        )
-                        rejected_url = (
-                            f'{rejected_url}?'
-                            f'{urlencode({"external_file__id__exact": obj.pk})}'
+                            'admin:imports_externaldatafile_review_product_rejections',
+                            args=[obj.pk],
                         )
                         links.append(format_html(
                             '<a href="{}">Review rejected rows</a>', rejected_url
@@ -1141,9 +1152,9 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
         return self._source_upload_view(
             request,
             file_type='PRODUCTS',
-            title='Upload products.csv',
-            expected_filename='products.csv',
-            allowed_extensions=('.csv', '.xlsx'),
+            title='Upload products.xls',
+            expected_filename='products.xls',
+            allowed_extensions=PRODUCT_SOURCE_EXTENSIONS,
         )
 
     def upload_stock_view(self, request):
@@ -1188,11 +1199,13 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
                 mime_type=(
                     getattr(uploaded, 'content_type', '')
                     or mimetypes.guess_type(filename)[0]
-                    or (
-                        'text/csv'
-                        if Path(filename).suffix.lower() == '.csv'
-                        else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                    )
+                    or {
+                        '.csv': 'text/csv',
+                        '.xls': 'application/vnd.ms-excel',
+                        '.xlsx': (
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        ),
+                    }.get(Path(filename).suffix.lower(), 'application/octet-stream')
                 ),
                 sha256=calculate_sha256(content),
                 notes=form.cleaned_data['notes'],
@@ -1653,6 +1666,150 @@ class ProductSourceRejectedRowAdmin(admin.ModelAdmin):
             )
         return redirect(
             reverse('admin:imports_productsourcerejectedrow_change', args=[obj.pk])
+        )
+
+
+@admin.register(ProductReconciliationDecision)
+class ProductReconciliationDecisionAdmin(ReadOnlySourceRowAdmin):
+    list_display = (
+        'external_file', 'product_code_normalized', 'group_key',
+        'row_action', 'decision_status', 'reviewed_by', 'reviewed_at',
+        'applied_by', 'applied_at',
+    )
+    list_filter = ('external_file__client', 'external_file', 'group_key', 'decision_status')
+    search_fields = ('product_code_normalized', 'notes')
+    list_select_related = (
+        'external_file', 'external_file__client', 'reviewed_by', 'applied_by',
+    )
+
+    def get_model_perms(self, request):
+        return {}
+
+
+@admin.register(ExternalDataCorrectionMemory)
+class ExternalDataCorrectionMemoryAdmin(admin.ModelAdmin):
+    change_list_template = (
+        'admin/imports/externaldatacorrectionmemory/change_list.html'
+    )
+    list_display = (
+        'workflow_key', 'client', 'record_key', 'approved_by', 'approved_at',
+        'last_used_at', 'use_count', 'is_active',
+    )
+    list_filter = ('workflow_key', 'client', 'is_active')
+    search_fields = ('record_key', 'approval_note', 'source_fingerprint')
+    list_select_related = ('client', 'approved_by', 'origin_external_file')
+    readonly_fields = (
+        'workflow_key', 'client', 'record_key', 'source_fingerprint',
+        'proposal_fingerprint', 'source_data', 'approved_data', 'approval_note',
+        'origin_external_file', 'approved_by', 'approved_at', 'last_used_at',
+        'use_count',
+    )
+    fields = readonly_fields + ('is_active',)
+
+    def get_urls(self):
+        custom_urls = [
+            path(
+                'download-excel/',
+                self.admin_site.admin_view(self.download_excel_view),
+                name='imports_externaldatacorrectionmemory_download_excel',
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def download_excel_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        queryset = self.get_changelist_instance(request).get_queryset(request)
+        response, record_count, part_count = correction_memory_export_response(
+            queryset,
+            filename_prefix='external_data_correction_memory',
+            scope_label='Current Django Admin filters and search',
+        )
+        create_audit_event(
+            event_type='EXTERNAL_CORRECTION_MEMORY_EXPORTED',
+            message=(
+                f'{record_count} visible correction memory record(s) exported '
+                f'in {part_count} Excel file(s).'
+            ),
+            actor=request.user,
+            metadata={
+                'record_count': record_count,
+                'part_count': part_count,
+                'format': 'XLSX',
+                'filters': request.GET.dict(),
+                'operational_tables_updated': False,
+            },
+            request=request,
+        )
+        return response
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser or request.user.has_perm(
+            'imports.manage_product_reconciliation'
+        )
+
+    def has_change_permission(self, request, obj=None):
+        return self.has_view_permission(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        previous_active = None
+        if change and obj.pk:
+            previous_active = ExternalDataCorrectionMemory.objects.filter(
+                pk=obj.pk
+            ).values_list('is_active', flat=True).first()
+        super().save_model(request, obj, form, change)
+        if previous_active is not None and previous_active != obj.is_active:
+            create_audit_event(
+                event_type='EXTERNAL_CORRECTION_MEMORY_STATUS_CHANGED',
+                message=(
+                    f'Correction memory #{obj.pk} '
+                    f'{"activated" if obj.is_active else "deactivated"}.'
+                ),
+                actor=request.user,
+                client=obj.client,
+                external_file=obj.origin_external_file,
+                metadata={
+                    'correction_memory_id': obj.pk,
+                    'workflow_key': obj.workflow_key,
+                    'record_key': obj.record_key,
+                    'previous_active': previous_active,
+                    'is_active': obj.is_active,
+                    'operational_tables_updated': False,
+                },
+                request=request,
+            )
+
+
+@admin.register(ProductReconciliationRule)
+class ProductReconciliationRuleAdmin(admin.ModelAdmin):
+    list_display = ('name', 'client', 'group_key', 'active', 'created_by', 'updated_at')
+    list_filter = ('client', 'group_key', 'active')
+    search_fields = ('name', 'notes')
+    list_select_related = ('client', 'created_by')
+    readonly_fields = (
+        'client', 'name', 'group_key', 'field_decisions',
+        'created_by', 'created_at', 'updated_at',
+    )
+    fields = (
+        'client', 'name', 'group_key', 'field_decisions', 'notes', 'active',
+        'created_by', 'created_at', 'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser or request.user.has_perm(
+            'imports.manage_product_reconciliation'
         )
 
 

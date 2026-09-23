@@ -2,14 +2,193 @@ from django import forms
 from django.core.validators import URLValidator
 
 from apps.clients.models import Client
-from apps.imports.models import ExternalDataFile
+from apps.imports.models import ExternalDataFile, ProductSourceRejectedRow, ProductSourceRow
+from apps.imports.services.product_file_adapters import PRODUCT_SOURCE_EXTENSIONS
+from apps.imports.services.product_repair import build_product_repair_proposal
+from apps.imports.services.xlsx_reader import normalize_product_sku
+
+
+FIELD_AUTHORITY_CHOICES = [
+    ('NO_CHANGE', 'No change / keep available value'),
+    ('SOURCE', 'Use Product source'),
+    ('OPERATIONAL', 'Keep Calculator'),
+    ('CUSTOM', 'Enter a custom value'),
+]
+
+
+class ProductReconciliationBulkForm(forms.Form):
+    selected_skus = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
+    preset = forms.ChoiceField(
+        choices=[
+            ('', 'Select what to do with selected products'),
+            ('KEEP_OPERATIONAL_ALL', 'Keep current Calculator product'),
+            (
+                'KEEP_PHYSICAL_USE_SOURCE_TEXT',
+                'Update descriptive information only',
+            ),
+            ('USE_SOURCE_SAFE', 'Update product from Products source'),
+            ('REMOVE_OPERATIONAL', 'Remove Calculator-only product (protected)'),
+            ('REFERENCE_ONLY', 'Keep as reference only'),
+        ]
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={'placeholder': 'Review reason / required for adoption'}),
+    )
+    save_as_rule = forms.BooleanField(required=False)
+    rule_name = forms.CharField(max_length=160, required=False)
+
+    def __init__(self, *args, available_skus=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['selected_skus'].choices = [(sku, sku) for sku in available_skus]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('save_as_rule') and not str(cleaned.get('rule_name') or '').strip():
+            self.add_error('rule_name', 'Enter a name for the reusable rule.')
+        return cleaned
+
+
+class ProductReconciliationIndividualForm(forms.Form):
+    sku = forms.CharField(widget=forms.HiddenInput())
+    name_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_name = forms.CharField(max_length=240, required=False)
+    description_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_description = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 2}))
+    dimensions_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_length_m = forms.DecimalField(required=False, min_value=0, max_digits=12, decimal_places=4)
+    custom_width_m = forms.DecimalField(required=False, min_value=0, max_digits=12, decimal_places=4)
+    custom_height_m = forms.DecimalField(required=False, min_value=0, max_digits=12, decimal_places=4)
+    weight_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_weight_kg = forms.DecimalField(required=False, min_value=0, max_digits=12, decimal_places=4)
+    cubic_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_cubic_m3 = forms.DecimalField(required=False, min_value=0, max_digits=12, decimal_places=6)
+    freight_type_authority = forms.ChoiceField(choices=FIELD_AUTHORITY_CHOICES)
+    custom_freight_type = forms.ChoiceField(
+        required=False,
+        choices=(('', 'Select C/P'), ('C', 'C — Case'), ('P', 'P — Pallet')),
+    )
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 2}))
+
+    def clean(self):
+        cleaned = super().clean()
+        requirements = {
+            'name_authority': ('custom_name',),
+            # An intentionally blank description is a valid approved Product value.
+            'description_authority': (),
+            'dimensions_authority': (
+                'custom_length_m', 'custom_width_m', 'custom_height_m',
+            ),
+            'weight_authority': ('custom_weight_kg',),
+            'cubic_authority': ('custom_cubic_m3',),
+            'freight_type_authority': ('custom_freight_type',),
+        }
+        for authority_field, value_fields in requirements.items():
+            if cleaned.get(authority_field) != 'CUSTOM':
+                continue
+            for value_field in value_fields:
+                if cleaned.get(value_field) in (None, ''):
+                    self.add_error(value_field, 'Required when custom value is selected.')
+        return cleaned
+
+    def field_decisions(self):
+        return {
+            'name': self.cleaned_data['name_authority'],
+            'description': self.cleaned_data['description_authority'],
+            'dimensions': self.cleaned_data['dimensions_authority'],
+            'weight': self.cleaned_data['weight_authority'],
+            'cubic': self.cleaned_data['cubic_authority'],
+            'freight_type': self.cleaned_data['freight_type_authority'],
+        }
+
+    def custom_values(self):
+        return {
+            'name': self.cleaned_data.get('custom_name'),
+            'description': self.cleaned_data.get('custom_description'),
+            'length_m': self.cleaned_data.get('custom_length_m'),
+            'width_m': self.cleaned_data.get('custom_width_m'),
+            'height_m': self.cleaned_data.get('custom_height_m'),
+            'weight_kg': self.cleaned_data.get('custom_weight_kg'),
+            'cubic_m3': self.cleaned_data.get('custom_cubic_m3'),
+            'freight_type': self.cleaned_data.get('custom_freight_type'),
+        }
+
+
+class ProductSourceRejectedRowReviewForm(forms.ModelForm):
+    code = forms.CharField(label='Product code', max_length=255)
+    name = forms.CharField(max_length=500, required=False)
+    description = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
+    category = forms.CharField(max_length=255, required=False)
+    length_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    width_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    height_mm = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    cubic_m3 = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    quantity = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    weight_kg = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    pallet = forms.DecimalField(required=False, min_value=0, max_digits=20, decimal_places=6)
+    comment = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
+    source_status = forms.CharField(label='Source status', max_length=100, required=False)
+
+    class Meta:
+        model = ProductSourceRejectedRow
+        fields = ('review_note',)
+        widgets = {'review_note': forms.Textarea(attrs={'rows': 3})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        proposal = dict(self.instance.proposed_data or {})
+        if not proposal:
+            proposal = build_product_repair_proposal(self.instance.raw_values or [])
+        for field_name in (
+            'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
+            'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
+            'source_status',
+        ):
+            if field_name not in self.initial:
+                self.fields[field_name].initial = proposal.get(field_name, '')
+        if self.instance.repair_status == 'APPROVED':
+            for field in self.fields.values():
+                field.disabled = True
+
+    def clean(self):
+        cleaned = super().clean()
+        approving = '_approve_repair' in self.data or '_approve_selected' in self.data
+        if approving and self.instance.repair_status == 'APPROVED':
+            raise forms.ValidationError('This repair is already approved and cannot be changed.')
+        # Bulk Review validates its shared note once at page level. Repeating the
+        # same missing-note error on every selected row made valid rows look bad.
+        if '_approve_repair' in self.data and not str(cleaned.get('review_note') or '').strip():
+            self.add_error('review_note', 'A review note is required for approval.')
+        if approving:
+            code = normalize_product_sku(cleaned.get('code'))
+            if not code:
+                self.add_error('code', 'Product code is required.')
+            elif ProductSourceRow.objects.filter(
+                external_file=self.instance.external_file,
+                product_code_normalized=code,
+            ).exists():
+                self.add_error(
+                    'code',
+                    f'Product code {code} already exists in valid staging for this file.',
+                )
+        return cleaned
+
+    def repair_payload(self):
+        return {
+            field_name: self.cleaned_data.get(field_name)
+            for field_name in (
+                'code', 'name', 'description', 'category', 'length_mm', 'width_mm',
+                'height_mm', 'cubic_m3', 'quantity', 'weight_kg', 'pallet', 'comment',
+                'source_status',
+            )
+        }
 
 
 class ExternalDataFileAdminForm(forms.ModelForm):
     file_type = forms.ChoiceField(
         choices=[
             ('FUEL', 'Fuel CSV'),
-            ('PRODUCTS', 'STH product source (products.csv)'),
+            ('PRODUCTS', 'STH product source (products.xls)'),
             ('STOCK', 'STH stock source (stock_sth.xlsx)'),
         ],
         initial='FUEL',
@@ -33,8 +212,12 @@ class ExternalDataFileAdminForm(forms.ModelForm):
         filename = uploaded_file.name.lower()
         if file_type == 'FUEL' and not filename.endswith('.csv'):
             self.add_error('uploaded_file', 'The fuel file must use the .csv extension.')
-        if file_type == 'PRODUCTS' and not filename.endswith(('.csv', '.xlsx')):
-            self.add_error('uploaded_file', 'The product source must use the .csv or .xlsx extension.')
+        if file_type == 'PRODUCTS' and not filename.endswith(PRODUCT_SOURCE_EXTENSIONS):
+            allowed = ', '.join(PRODUCT_SOURCE_EXTENSIONS)
+            self.add_error(
+                'uploaded_file',
+                f'The product source must use one of these extensions: {allowed}.',
+            )
         if file_type == 'STOCK' and not filename.endswith('.xlsx'):
             self.add_error('uploaded_file', 'The stock source must use the .xlsx extension.')
         return cleaned

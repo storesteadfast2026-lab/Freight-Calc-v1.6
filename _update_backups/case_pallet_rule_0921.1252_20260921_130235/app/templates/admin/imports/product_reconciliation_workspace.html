@@ -1,0 +1,224 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .workspace-safe { padding:12px; margin:12px 0; border-left:4px solid #417690; background:var(--darkened-bg); }
+  .workspace-warning { padding:12px; margin:12px 0; border-left:4px solid #ba2121; background:#fff3f3; color:#7a1515; }
+  .workspace-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:16px 0; }
+  .workspace-card { border:1px solid var(--hairline-color); padding:10px 12px; background:var(--body-bg); }
+  .workspace-card strong { display:block; font-size:20px; }
+  .workspace-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+  .workspace-layout { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
+  .workspace-groups,.workspace-main,.workspace-editor,.workspace-rules { border:1px solid var(--hairline-color); background:var(--body-bg); }
+  .workspace-panel-title { padding:10px 12px; border-bottom:1px solid var(--hairline-color); background:var(--darkened-bg); }
+  .workspace-panel-title h2 { margin:0; font-size:15px; }
+  .workspace-group { display:grid; grid-template-columns:1fr auto; gap:4px 8px; padding:10px 12px; border-bottom:1px solid var(--hairline-color); color:var(--link-fg); }
+  .workspace-group.selected { border-left:4px solid #417690; background:var(--selected-row); color:var(--body-fg); font-weight:bold; }
+  .workspace-group small { grid-column:1/-1; color:var(--body-quiet-color); font-weight:normal; }
+  .workspace-filter { display:flex; gap:8px; align-items:end; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--hairline-color); }
+  .workspace-filter label { display:flex; flex-direction:column; gap:4px; }
+  .workspace-bulk { padding:10px 12px; background:var(--darkened-bg); border-bottom:1px solid var(--hairline-color); }
+  .workspace-bulk-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .workspace-table-wrap { overflow-x:auto; }
+  .workspace-table { width:100%; min-width:900px; table-layout:fixed; }
+  .workspace-table th,.workspace-table td { padding:8px; vertical-align:top; overflow-wrap:anywhere; }
+  .workspace-table .select { width:38px; }
+  .workspace-table .sku { width:14%; }
+  .workspace-table .difference { width:17%; }
+  .workspace-table .values { width:23%; }
+  .workspace-table .decision { width:15%; }
+  .workspace-label { display:block; font-size:10px; font-weight:bold; text-transform:uppercase; }
+  .workspace-source { color:var(--body-fg); }
+  .workspace-current { margin-top:5px; color:var(--body-quiet-color); }
+  .workspace-badge { display:inline-block; padding:2px 6px; margin:1px; border-radius:3px; background:var(--darkened-bg); }
+  .workspace-draft { border-left:4px solid #2b7a3d; }
+  .workspace-pending { border-left:4px solid #e67e22; }
+  .workspace-editor { margin-top:14px; padding-bottom:12px; }
+  .workspace-editor-grid { display:grid; grid-template-columns:150px 1fr 1fr 1.3fr; }
+  .workspace-editor-grid > div { padding:8px 10px; border-bottom:1px solid var(--hairline-color); }
+  .workspace-editor-grid .heading { font-weight:bold; background:var(--darkened-bg); }
+  .workspace-custom { display:flex; gap:5px; flex-wrap:wrap; margin-top:4px; }
+  .workspace-custom input { width:100px; }
+  .workspace-protected { padding:10px 12px; margin:10px 12px; border-left:4px solid #ba2121; background:var(--darkened-bg); }
+  .workspace-preview-table { width:100%; }
+  .workspace-preview-table th,.workspace-preview-table td { padding:8px; vertical-align:top; }
+  .workspace-rules { margin-top:14px; }
+  .workspace-rule { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--hairline-color); }
+  .workspace-paginator { margin-top:12px; }
+  @media (max-width:900px) {
+    .workspace-layout { grid-template-columns:1fr; }
+    .workspace-editor-grid { grid-template-columns:1fr 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs"><a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo; <a href="{{ back_url }}">External data files</a> &rsaquo; {{ title }}</div>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<p>{{ page_description }}</p>
+<p><strong>{{ source.original_filename }}</strong> · {{ source.client.code }}</p>
+
+{% if blocked %}
+<div class="workspace-warning"><strong>Comparison is not ready.</strong> {{ summary.pending_rejected }} rejected row(s) still require approval. Complete rejected-row review first.</div>
+{% else %}
+<div class="workspace-safe"><strong>Diagnostic only.</strong> Draft decisions can be saved, grouped and previewed here. This phase cannot update Product, Calculator or C/P.</div>
+{% endif %}
+
+<div class="workspace-summary">
+  <div class="workspace-card">Source rows<strong>{{ summary.source_rows }}</strong></div>
+  <div class="workspace-card">Operational Products<strong>{{ summary.operational_products }}</strong></div>
+  <div class="workspace-card">Different<strong>{{ summary.different }}</strong></div>
+  <div class="workspace-card">Draft decisions<strong>{{ summary.draft_decisions }}</strong></div>
+  <div class="workspace-card">Source only<strong>{{ summary.source_only }}</strong></div>
+  <div class="workspace-card">Operational only<strong>{{ summary.operational_only }}</strong></div>
+</div>
+
+<div class="workspace-actions">
+  <a class="button" href="?group={{ selected_group }}">Review groups</a>
+  <a class="button" href="?group={{ selected_group }}&mode=preview">Preview draft decisions ({{ summary.draft_decisions }})</a>
+  <strong>No operational Apply action is enabled in this phase.</strong>
+</div>
+
+{% if preview_mode %}
+<div class="workspace-main">
+  <div class="workspace-panel-title"><h2>Preview draft decisions</h2></div>
+  <div class="workspace-protected"><strong>C/P is protected.</strong> Freight type remains the current Calculator value and is never inferred from the Product source pallet field.</div>
+  <div class="workspace-table-wrap">
+    <table class="workspace-preview-table">
+      <thead><tr><th>SKU</th><th>Draft authorities</th><th>Proposed name</th><th>Proposed dimensions</th><th>Proposed weight / cubic</th><th>C/P</th></tr></thead>
+      <tbody>
+      {% for item in preview_rows %}
+        <tr>
+          <td><strong>{{ item.row.sku }}</strong><br><small>{{ item.row.status }}</small></td>
+          <td>{{ item.decision.field_decisions }}</td>
+          <td>{{ item.proposed_values.name|default:"—" }}{% if item.proposed_values.description %}<br><small>{{ item.proposed_values.description }}</small>{% endif %}</td>
+          <td>{{ item.proposed_values.length_m|default:"—" }} × {{ item.proposed_values.width_m|default:"—" }} × {{ item.proposed_values.height_m|default:"—" }} m</td>
+          <td>{{ item.proposed_values.weight_kg|default:"—" }} kg · {{ item.proposed_values.cubic_m3|default:"—" }} m³</td>
+          <td>{{ item.proposed_values.freight_type|default:"Not assigned" }}<br><small>Protected</small></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">No draft decisions have been saved yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="workspace-layout">
+  <aside class="workspace-groups">
+    <div class="workspace-panel-title"><h2>Review queue</h2></div>
+    {% for item in group_navigation %}
+      <a class="workspace-group{% if selected_group == item.key %} selected{% endif %}" href="?group={{ item.key }}">
+        <span>{{ item.label }}</span><span>{{ item.count }}</span>
+        {% if item.key == 'SOURCE_ONLY' %}<small>Reference only by default</small>{% elif item.key == 'SOURCE_DIMENSIONS_ZERO' %}<small>Protect valid Calculator dimensions</small>{% endif %}
+      </a>
+    {% endfor %}
+  </aside>
+
+  <section class="workspace-main">
+    <div class="workspace-panel-title"><h2>{{ selected_group_label }} · {{ result_count }} result(s)</h2></div>
+    <form method="get" class="workspace-filter">
+      <input type="hidden" name="group" value="{{ selected_group }}">
+      <label>Search SKU or name<input type="search" name="q" value="{{ search }}"></label>
+      <button type="submit" class="button">Filter</button>
+    </form>
+
+    {% if not blocked and can_manage %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="workspace_action" value="save_bulk">
+      <input type="hidden" name="group" value="{{ selected_group }}">
+      <div class="workspace-bulk">
+        <strong>Bulk draft decision</strong>
+        <div class="workspace-bulk-row">
+          {{ bulk_form.preset }}
+          {{ bulk_form.notes }}
+          <label>{{ bulk_form.save_as_rule }} Save as reusable rule</label>
+          {{ bulk_form.rule_name }}
+          <button type="submit" name="scope" value="selected" class="button default">Save selected drafts</button>
+          <button type="submit" name="scope" value="group" class="button">Save all {{ group_result_count }} in this group</button>
+        </div>
+      </div>
+      <div class="workspace-table-wrap">
+        <table class="workspace-table">
+          <thead><tr><th class="select">Select</th><th class="sku">SKU / row</th><th class="difference">State / reasons</th><th class="values">Source and Calculator text</th><th class="values">Physical values</th><th class="decision">Draft decision</th><th></th></tr></thead>
+          <tbody>
+          {% for row in page_obj %}
+            <tr class="{% if row.decision %}workspace-draft{% else %}workspace-pending{% endif %}">
+              <td><input type="checkbox" name="selected_skus" value="{{ row.sku }}" aria-label="Select {{ row.sku }}"></td>
+              <td><strong>{{ row.sku }}</strong><br><small>{% if row.source_row_number %}Row {{ row.source_row_number }}{% else %}No source row{% endif %}</small><br><small>C/P: {{ row.operational_values.freight_type|default:"Not assigned" }}</small></td>
+              <td><strong>{{ row.status }}</strong><br>{% for warning in row.warnings %}<span class="workspace-badge">{{ warning }}</span>{% empty %}—{% endfor %}</td>
+              <td><span class="workspace-label">Source</span><span class="workspace-source">{{ row.source_values.name|default:"—" }}</span>{% if row.source_values.description %}<br><small>{{ row.source_values.description }}</small>{% endif %}<div class="workspace-current"><span class="workspace-label">Calculator</span>{{ row.operational_values.name|default:"—" }}{% if row.operational_values.description %}<br><small>{{ row.operational_values.description }}</small>{% endif %}</div></td>
+              <td><span class="workspace-label">Source</span>{{ row.source_values.length_m|default:"—" }} × {{ row.source_values.width_m|default:"—" }} × {{ row.source_values.height_m|default:"—" }} m<br>{{ row.source_values.weight_kg|default:"—" }} kg · {{ row.source_values.cubic_m3|default:"—" }} m³<div class="workspace-current"><span class="workspace-label">Calculator</span>{{ row.operational_values.length_m|default:"—" }} × {{ row.operational_values.width_m|default:"—" }} × {{ row.operational_values.height_m|default:"—" }} m<br>{{ row.operational_values.weight_kg|default:"—" }} kg · {{ row.operational_values.cubic_m3|default:"—" }} m³</div></td>
+              <td>{% if row.decision %}<span class="workspace-badge">DRAFT</span><br><small>{{ row.decision.field_decisions }}</small>{% else %}Pending{% endif %}</td>
+              <td><a class="button" href="?group={{ selected_group }}&q={{ search|urlencode }}&edit={{ row.sku|urlencode }}">Edit</a></td>
+            </tr>
+          {% empty %}<tr><td colspan="7">No records match this group and filter.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+    {% elif not blocked %}
+      <div class="workspace-table-wrap"><table class="workspace-table"><tbody><tr><td>You can view this workspace but do not have permission to save decisions.</td></tr></tbody></table></div>
+    {% endif %}
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <p class="workspace-paginator">
+      {% if page_obj.has_previous %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+      Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+      {% if page_obj.has_next %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+    </p>
+    {% endif %}
+  </section>
+</div>
+
+{% if edit_row and individual_form and can_manage and not blocked %}
+<section class="workspace-editor">
+  <div class="workspace-panel-title"><h2>Individual review · {{ edit_row.sku }}</h2></div>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="workspace_action" value="save_individual">
+    <input type="hidden" name="group" value="{{ selected_group }}">
+    {{ individual_form.sku }}
+    <div class="workspace-editor-grid">
+      <div class="heading">Field</div><div class="heading">Source</div><div class="heading">Calculator</div><div class="heading">Decision / custom value</div>
+      <div>Name</div><div>{{ edit_row.source_values.name|default:"—" }}</div><div>{{ edit_row.operational_values.name|default:"—" }}</div><div>{{ individual_form.name_authority }}<div class="workspace-custom">{{ individual_form.custom_name }}</div></div>
+      <div>Description</div><div>{{ edit_row.source_values.description|default:"—" }}</div><div>{{ edit_row.operational_values.description|default:"—" }}</div><div>{{ individual_form.description_authority }}<div class="workspace-custom">{{ individual_form.custom_description }}</div></div>
+      <div>Dimensions (m)</div><div>{{ edit_row.source_values.length_m|default:"—" }} × {{ edit_row.source_values.width_m|default:"—" }} × {{ edit_row.source_values.height_m|default:"—" }}</div><div>{{ edit_row.operational_values.length_m|default:"—" }} × {{ edit_row.operational_values.width_m|default:"—" }} × {{ edit_row.operational_values.height_m|default:"—" }}</div><div>{{ individual_form.dimensions_authority }}<div class="workspace-custom">{{ individual_form.custom_length_m }} {{ individual_form.custom_width_m }} {{ individual_form.custom_height_m }}</div></div>
+      <div>Weight (kg)</div><div>{{ edit_row.source_values.weight_kg|default:"—" }}</div><div>{{ edit_row.operational_values.weight_kg|default:"—" }}</div><div>{{ individual_form.weight_authority }}<div class="workspace-custom">{{ individual_form.custom_weight_kg }}</div></div>
+      <div>Cubic (m³)</div><div>{{ edit_row.source_values.cubic_m3|default:"—" }}</div><div>{{ edit_row.operational_values.cubic_m3|default:"—" }}</div><div>{{ individual_form.cubic_authority }}<div class="workspace-custom">{{ individual_form.custom_cubic_m3 }}</div></div>
+    </div>
+    <div class="workspace-protected"><strong>C/P is protected.</strong> Current value: {{ edit_row.operational_values.freight_type|default:"Not assigned" }}. This workspace cannot infer or change it.</div>
+    <div class="workspace-actions" style="padding:0 12px;">
+      <label>Review note {{ individual_form.notes }}</label>
+      <button type="submit" class="button default">Save individual draft</button>
+      <a class="button" href="?group={{ selected_group }}&q={{ search|urlencode }}">Close</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if rules and can_manage and not blocked %}
+<section class="workspace-rules">
+  <div class="workspace-panel-title"><h2>Reusable rules for {{ source.client.code }}</h2></div>
+  {% for rule in rules %}
+  <div class="workspace-rule">
+    <span><strong>{{ rule.name }}</strong><br><small>{{ rule.group_key }} · {{ rule.field_decisions }}</small></span>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="workspace_action" value="apply_rule">
+      <input type="hidden" name="group" value="{{ selected_group }}">
+      <input type="hidden" name="rule_id" value="{{ rule.pk }}">
+      <button type="submit" class="button">Apply rule as drafts</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -17,6 +17,7 @@ from apps.carriers.models import Carrier, CarrierService, ClientCarrierConfig
 from apps.clients.models import Client
 from apps.imports.admin import ExternalDataFileAdmin, ProductSourceRejectedRowAdmin
 from apps.imports.models import (
+    ExternalDataCorrectionMemory,
     ExternalDataFile,
     ProductSourceRejectedRow,
     ProductSourceRow,
@@ -33,6 +34,7 @@ from apps.imports.services.product_repair import (
     build_product_repair_proposal,
     save_product_repair_proposal,
 )
+from apps.imports.services.product_reconciliation import build_product_reconciliation
 from apps.imports.services.stock_source import validate_stock_source_file
 from apps.imports.services.xlsx_reader import SourceImportError, calculate_sha256, normalize_sku
 from apps.products.models import Product
@@ -294,6 +296,18 @@ class ProductStockSourceTests(TestCase):
             'source_status': 'L',
         }
 
+    @staticmethod
+    def _bulk_review_post(rows_and_payloads, *, note, action='_approve_selected'):
+        data = {
+            'selected': [str(row.pk) for row, _payload in rows_and_payloads],
+            'bulk_review_note': note,
+            action: '1',
+        }
+        for row, payload in rows_and_payloads:
+            for field_name, value in payload.items():
+                data[f'row-{row.pk}-{field_name}'] = '' if value is None else str(value)
+        return data
+
     def test_proposal_save_is_audited_and_does_not_enter_staging(self):
         external_file, rejected = self._validated_products_with_rejected_20985()
         before = self.operational_snapshot()
@@ -386,7 +400,218 @@ class ProductStockSourceTests(TestCase):
 
         external_file.refresh_from_db()
         file_admin = ExternalDataFileAdmin(ExternalDataFile, admin.site)
-        self.assertIn('Review rejected rows', str(file_admin.operation_links(external_file)))
+        operation_links = str(file_admin.operation_links(external_file))
+        bulk_url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[external_file.pk],
+        )
+        self.assertIn('Review rejected rows', operation_links)
+        self.assertIn(bulk_url, operation_links)
+
+        bulk_response = self.client.get(bulk_url)
+        self.assertEqual(bulk_response.status_code, 200)
+        self.assertContains(bulk_response, 'Select all visible')
+        self.assertContains(bulk_response, 'Approve selected')
+        self.assertContains(bulk_response, 'Wheel Support Device')
+        self.assertContains(bulk_response, 'Edit')
+
+    def test_bulk_review_approves_only_selected_rows(self):
+        external_file, selected = self._validated_products_with_rejected_20985()
+        other = ProductSourceRejectedRow.objects.create(
+            external_file=external_file,
+            source_row_number=4,
+            column_count=12,
+            raw_values=[
+                '4307',
+                'CaravanSpareWheelCover13",Caravan Spare Wheel Cover 13 Inch 7926"',
+                'MTQGEN', '0.000', '0.000', '0.000', '0.0030', '1.000',
+                '0.8000', '0.000', 'Unit 5x30x20cm 0.8kg', 'L',
+            ],
+            validation_errors=['Row 4: expected 13 columns; found 12.'],
+        )
+        before = self.operational_snapshot()
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[external_file.pk],
+        )
+
+        response = self.client.post(url, self._bulk_review_post(
+            [(selected, self._approved_20985_payload())],
+            note='Selected row checked against Translogic.',
+        ))
+
+        self.assertRedirects(response, url)
+        selected.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(selected.repair_status, 'APPROVED')
+        self.assertEqual(other.repair_status, 'PENDING')
+        self.assertTrue(ProductSourceRow.objects.filter(
+            external_file=external_file,
+            product_code_normalized='20985',
+        ).exists())
+        self.assertFalse(ProductSourceRow.objects.filter(
+            external_file=external_file,
+            source_row_number=other.source_row_number,
+        ).exists())
+        self.assertEqual(self.operational_snapshot(), before)
+
+    def test_bulk_review_missing_note_does_not_report_valid_rows_as_invalid(self):
+        external_file, selected = self._validated_products_with_rejected_20985()
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[external_file.pk],
+        )
+
+        response = self.client.post(url, self._bulk_review_post(
+            [(selected, self._approved_20985_payload())],
+            note='',
+        ))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Enter a review note before approving selected rows.')
+        self.assertNotContains(response, 'contains invalid values')
+        self.assertContains(response, 'bulk-review-note-error')
+        selected.refresh_from_db()
+        self.assertEqual(selected.repair_status, 'PENDING')
+
+    def test_bulk_review_identifies_exact_invalid_field_and_opens_editor(self):
+        external_file, selected = self._validated_products_with_rejected_20985()
+        payload = self._approved_20985_payload()
+        payload['cubic_m3'] = 'not-a-number'
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[external_file.pk],
+        )
+
+        response = self.client.post(url, self._bulk_review_post(
+            [(selected, payload)],
+            note='Testing field-level validation.',
+        ))
+
+        self.assertEqual(response.status_code, 200)
+        field_error = next(
+            error for error in response.context['page_errors']
+            if error['field_id'] == f'id_row-{selected.pk}-cubic_m3'
+        )
+        self.assertIn(f'Row {selected.source_row_number} — Cubic M3:', field_error['message'])
+        self.assertContains(response, f'href="#id_row-{selected.pk}-cubic_m3"')
+        self.assertContains(response, 'bulk-review-field-error')
+        self.assertContains(response, 'bulk-review-row-invalid')
+        selected.refresh_from_db()
+        self.assertEqual(selected.repair_status, 'PENDING')
+
+    def test_bulk_review_records_and_reuses_exact_correction_memory(self):
+        first_file, first = self._validated_products_with_rejected_20985()
+        self.client.force_login(self.user)
+        first_url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[first_file.pk],
+        )
+        first_response = self.client.post(first_url, self._bulk_review_post(
+            [(first, self._approved_20985_payload())],
+            note='Approved correction for future identical uploads.',
+        ))
+        self.assertRedirects(first_response, first_url)
+
+        memory = ExternalDataCorrectionMemory.objects.get(
+            workflow_key='product_rejected_rows',
+            client=self.client_obj,
+            record_key='20985',
+        )
+        self.assertEqual(memory.use_count, 1)
+        self.assertEqual(memory.approved_data['description'], self._approved_20985_payload()['description'])
+        self.assertTrue(AuditEvent.objects.filter(
+            event_type='EXTERNAL_CORRECTION_MEMORY_RECORDED'
+        ).exists())
+
+        second_file, second = self._validated_products_with_rejected_20985()
+        second_url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[second_file.pk],
+        )
+        response = self.client.get(second_url)
+        self.assertContains(response, 'Previously approved — identical source')
+        self.assertEqual(response.context['rows'][0]['memory_state'], 'EXACT')
+        self.assertEqual(
+            response.context['rows'][0]['form'].initial.get('description'),
+            self._approved_20985_payload()['description'],
+        )
+        self.assertEqual(
+            response.context['rows'][0]['form']['description'].value(),
+            self._approved_20985_payload()['description'],
+        )
+
+        second_response = self.client.post(second_url, self._bulk_review_post(
+            [(second, self._approved_20985_payload())],
+            note='Reused identical approved correction.',
+        ))
+        self.assertRedirects(second_response, second_url)
+        memory.refresh_from_db()
+        self.assertEqual(memory.use_count, 2)
+
+    def test_bulk_review_does_not_reuse_memory_when_source_changed(self):
+        first_file, first = self._validated_products_with_rejected_20985()
+        self.client.force_login(self.user)
+        first_url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[first_file.pk],
+        )
+        self.client.post(first_url, self._bulk_review_post(
+            [(first, self._approved_20985_payload())],
+            note='Initial approved correction.',
+        ))
+
+        changed_file, changed = self._validated_products_with_rejected_20985()
+        changed.raw_values = list(changed.raw_values)
+        changed.raw_values[1] = f'{changed.raw_values[1]} changed'
+        changed.save(update_fields=['raw_values'])
+        changed_url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[changed_file.pk],
+        )
+
+        response = self.client.get(changed_url)
+
+        self.assertContains(response, 'Previous correction found — source changed')
+        self.assertNotContains(response, 'Previously approved — identical source')
+
+    def test_bulk_review_approval_is_atomic_when_one_selected_row_fails(self):
+        external_file, first = self._validated_products_with_rejected_20985()
+        second = ProductSourceRejectedRow.objects.create(
+            external_file=external_file,
+            source_row_number=4,
+            column_count=12,
+            raw_values=['SECOND'] * 12,
+            validation_errors=['Row 4: expected 13 columns; found 12.'],
+        )
+        first_payload = self._approved_20985_payload()
+        first_payload['code'] = 'BULK-DUP'
+        second_payload = self._approved_20985_payload()
+        second_payload['code'] = 'BULK-DUP'
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_review_product_rejections',
+            args=[external_file.pk],
+        )
+
+        response = self.client.post(url, self._bulk_review_post(
+            [(first, first_payload), (second, second_payload)],
+            note='Atomic duplicate-code test.',
+        ))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'already exists in valid staging')
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.repair_status, 'PENDING')
+        self.assertEqual(second.repair_status, 'PENDING')
+        self.assertFalse(ProductSourceRow.objects.filter(
+            external_file=external_file,
+            product_code_normalized='BULK-DUP',
+        ).exists())
 
     def test_repair_rollback_cleanup_removes_only_approved_staging_row(self):
         external_file, rejected = self._validated_products_with_rejected_20985()
@@ -534,3 +759,79 @@ class ProductStockSourceTests(TestCase):
         self.assertIn('View rows', links)
         self.assertNotIn('Activate', links)
         self.assertNotIn('Rollback', links)
+
+    def test_product_reconciliation_compares_source_without_updating_product(self):
+        content = build_xlsx('product_sth', PRODUCT_HEADERS, [
+            [
+                'CM245-AS', 'Master hoist', 'Master description', 'STHHOI',
+                0, 0, 0, 1.500, 1, 800, 0,
+                'Alternative packing dimensions in Translogic comment.', 'L',
+            ],
+            [
+                'NEW-001', 'New source product', '', 'TEST',
+                100, 200, 300, 0.006, 1, 10, 1, '', 'L',
+            ],
+        ])
+        external_file = self.create_external_file('PRODUCTS', content, 'product_sth.xlsx')
+        validate_product_source_file(external_file, actor=self.user)
+        before = self.operational_snapshot()
+
+        rows, summary = build_product_reconciliation(external_file)
+
+        matched = next(row for row in rows if row['sku'] == 'CM245-AS')
+        new = next(row for row in rows if row['sku'] == 'NEW-001')
+        self.assertEqual(matched['status'], 'DIFFERENT')
+        self.assertIn('SOURCE_DIMENSIONS_ZERO', matched['warnings'])
+        self.assertIn('DIMENSIONS_DIFFERENT', matched['warnings'])
+        self.assertIn('WEIGHT_DIFFERENT', matched['warnings'])
+        self.assertIn('CUBIC_DIFFERENT', matched['warnings'])
+        self.assertEqual(matched['operational_values']['freight_type'], 'P')
+        self.assertEqual(new['status'], 'SOURCE_ONLY')
+        self.assertIn('FREIGHT_TYPE_REQUIRED', new['warnings'])
+        self.assertEqual(summary['different'], 1)
+        self.assertEqual(summary['source_only'], 1)
+        self.assertFalse(summary['operational_tables_updated'])
+        self.assertEqual(self.operational_snapshot(), before)
+
+    def test_product_reconciliation_screen_is_protected_filterable_and_linked(self):
+        content = build_xlsx('product_sth', PRODUCT_HEADERS, [[
+            'CM245-AS', 'Approved hoist', '', 'STHHOI',
+            2930, 1120, 500, 1.641, 1, 825, 1, '', 'L',
+        ]])
+        external_file = self.create_external_file('PRODUCTS', content, 'product_sth.xlsx')
+        validate_product_source_file(external_file, actor=self.user)
+        before = self.operational_snapshot()
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_product_reconciliation',
+            args=[external_file.pk],
+        )
+
+        response = self.client.get(f'{url}?status=ALL&q=CM245')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Protected workflow.')
+        self.assertContains(response, 'CM245-AS')
+        self.assertContains(response, 'C/P: P')
+        self.assertNotContains(response, 'Approve selected')
+        self.assertContains(response, 'Apply is available only from the reviewed preview.')
+        external_file.refresh_from_db()
+        links = str(ExternalDataFileAdmin(ExternalDataFile, admin.site).operation_links(external_file))
+        self.assertIn('Product reconciliation', links)
+        self.assertIn(url, links)
+        self.assertEqual(self.operational_snapshot(), before)
+
+    def test_product_reconciliation_is_blocked_while_rejected_rows_are_pending(self):
+        external_file, _rejected = self._validated_products_with_rejected_20985()
+        self.client.force_login(self.user)
+        url = reverse(
+            'admin:imports_externaldatafile_product_reconciliation',
+            args=[external_file.pk],
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Comparison is not ready.')
+        self.assertContains(response, '1 rejected row(s) still require approval')
+        self.assertNotContains(response, '<table class="recon-table">', html=False)

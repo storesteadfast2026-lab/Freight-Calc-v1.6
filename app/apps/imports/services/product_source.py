@@ -5,7 +5,6 @@ import csv
 import io
 from collections import Counter
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 from django.db import transaction
@@ -18,14 +17,13 @@ from apps.imports.models import (
 )
 from apps.imports.services.audit import create_audit_event
 from apps.imports.services.product_repair import build_product_repair_proposal
+from apps.imports.services.product_file_adapters import read_product_file
 from apps.imports.services.xlsx_reader import (
     SourceImportError,
     calculate_sha256,
     normalize_product_sku,
     parse_decimal,
-    read_csv_records,
     read_file_bytes,
-    read_xlsx_records,
     value_to_text,
 )
 from apps.products.models import Product
@@ -212,6 +210,10 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
         'current_length_m', 'current_width_m', 'current_height_m',
         'current_weight_kg', 'current_cubic_m3',
     ])
+    source_column_count = int(
+        (external_file.validation_summary or {}).get('source_column_count')
+        or PRODUCT_CSV_COLUMN_COUNT
+    )
     for row in ProductSourceRow.objects.filter(external_file=external_file).iterator():
         product = products.get(row.product_code_normalized)
         comparison, differences = _comparison_details(
@@ -219,7 +221,7 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
             product,
         )
         writer.writerow([
-            'VALID', row.source_row_number, PRODUCT_CSV_COLUMN_COUNT,
+            'VALID', row.source_row_number, source_column_count,
             row.product_code_normalized, comparison, '|'.join(differences), '', row.name,
             _dimension_status({
                 'length_mm': row.length_mm,
@@ -266,31 +268,24 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
     try:
         content = read_file_bytes(external_file)
         calculated_hash = calculate_sha256(content)
-        suffix = Path(external_file.original_filename or '').suffix.lower()
-        rejected_rows: list[dict[str, Any]] = []
-        encoding = ''
-        if suffix == '.csv':
-            sheet_name, header_row, headers, records, rejected_rows, encoding = read_csv_records(
-                content,
-                aliases=PRODUCT_ALIASES,
-                required_fields=PRODUCT_REQUIRED_FIELDS,
-                expected_column_count=PRODUCT_CSV_COLUMN_COUNT,
-            )
-            source_format = 'CSV'
-        elif suffix == '.xlsx':
-            sheet_name, header_row, headers, records = read_xlsx_records(
-                content,
-                preferred_sheet_names=('product_sth', 'products', 'product'),
-                aliases=PRODUCT_ALIASES,
-                required_fields=PRODUCT_REQUIRED_FIELDS,
-            )
-            source_format = 'XLSX'
-        else:
-            raise SourceImportError('Product source must use the .csv or .xlsx extension.')
+        source = read_product_file(
+            content,
+            external_file.original_filename,
+            aliases=PRODUCT_ALIASES,
+            required_fields=PRODUCT_REQUIRED_FIELDS,
+            expected_csv_column_count=PRODUCT_CSV_COLUMN_COUNT,
+        )
+        sheet_name = source.worksheet
+        header_row = source.header_row
+        headers = source.headers
+        records = source.records
+        rejected_rows = list(source.rejected_rows)
+        encoding = source.encoding
+        source_format = source.source_format
 
         rows_received = len(records) + len(rejected_rows)
         parsed, errors, duplicate_codes, skipped_empty = _parse_product_records(records)
-        if source_format == 'XLSX' and errors:
+        if source_format in {'XLS', 'XLSX'} and errors:
             raise SourceImportError('; '.join(errors[:25]))
 
         if source_format == 'CSV':
@@ -331,7 +326,7 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
             .first()
         )
 
-        warnings = []
+        warnings = list(source.warnings)
         if duplicate_file:
             warnings.append(f'Duplicate content already exists in file #{duplicate_file.pk}.')
         if rejected_rows:
@@ -343,12 +338,13 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
 
         summary = {
             'source_type': 'PRODUCTS',
-            'source_filename_expected': 'products.csv',
+            'source_filename_expected': 'products.xls',
             'source_format': source_format,
             'encoding': encoding,
             'worksheet': sheet_name,
             'header_row': header_row,
             'headers': headers,
+            'source_column_count': source.source_column_count,
             'rows_received': rows_received,
             'rows_valid': len(parsed),
             'rows_invalid': len(rejected_rows),

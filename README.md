@@ -2,6 +2,14 @@
 
 Django/PostgreSQL application for migrating the logic in `V2026.R2_Unlocked_STH_Freight_Calculator.xlsx` to a multi-client web platform.
 
+## Update delivery format
+
+When an AI assistant provides a code update for this project, deliver a versioned ZIP (`MMDD.HHMM`) with these items at its root: `01_Open_PowerShell_Here.bat`, `02_Apply_Update.bat`, `03_Rollback_Update.bat`, `Apply_Update.ps1`, `Rollback_Update.ps1`, `MANIFEST.csv`, `README_UPDATE_MMDD.HHMM.md`, and `payload/`. The user supplied a screenshot of this package layout as the preferred example; its contents were only an example, not the latest application version.
+
+Documentation present only in a generated AI review ZIP may be absent from the live project. An installer may create such a document after checking that the path is absent, and rollback must remove only that newly created file.
+
+The manifest must list every changed file with its relative project path and original/new SHA-256 hashes. Application must verify hashes before copying, back up existing files, and stop if the local project has diverged from the supplied source snapshot. Rollback must verify the installed hashes and restore the backed-up files without touching the database or unrelated files. Include exact Windows/PowerShell instructions and test commands in the package README. Do not make the user manually copy one Python file or replace the entire project with an older ZIP. See `AI_REVIEW_CONTEXT.md` and `docs/20_ai_project_continuation_prompt.md` for the same delivery preference.
+
 ## Current status and evidence
 
 **Documentation review:** 2026-08-19 08:10 Australia/Adelaide  

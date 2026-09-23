@@ -1,6 +1,6 @@
 # Django Admin Configuration Dictionary
 
-**Version:** 0819.0810
+**Version:** 0921.1137
 
 This document explains what each administration section represents, where its data originates and its current effect.
 
@@ -19,9 +19,11 @@ This document explains what each administration section represents, where its da
 | Rates > Freight rates | FreightRate | Rate rows and charges. | zone/subzone/area, weight_break, freight_type, customer_code, minimum/basic/subsequent/per_kg | RATES. | Calculates `freight_base` and several extras. | `margin` and `overlength_charge` are currently unused; retain six-decimal precision. | RATE-KEY-001 to RATE-MARGIN-001 |
 | Rates > Carrier tailgate charges | CarrierTailgateCharge | Tailgate and hand-unload amounts by client/carrier. | minimum_charge, per_subsequent_charge, hand_unload_charge | SettingFlags rows 34:52. | Calculates the pallet-based charge. | Configuration is per carrier, not per service. | TAIL-MIN-001, TAIL-PER-001, HAND-AMT-001 |
 | Audit > Audit events | AuditEvent | Immutable audit record for system operations. | actor, client, external_file, event_type, severity, message, metadata, ip_address, request_id, created_at | None. | Fuel services create automatic fetch/upload/validation/activation/failure/rollback events. | The screen is read-only and does not permit creating or deleting events through Admin. | AUDIT-001, FUEL-SRC-001, FUEL-ROLL-001 |
-| Imports > External data files | ExternalDataFile | Register and stored file for external sources by client. | file_type, source_method, uploaded_file, sha256, status, validation_summary, actors/timestamps | products.csv, stock_sth.xlsx, fuel.csv | Centralises upload, validation and audit; Fuel also supports activation/rollback. | Product/Stock are reference data; Fuel can change `fuel_levy`. Do not delete history. | IMP-EXT-001 |
-| Imports > Product source rows | ProductSourceRow | Valid `products.csv` rows for reference and field comparison. | product_code, dimensions, cubic, quantity, weight, pallet, status, raw_data | products.csv | Does not participate in autocomplete or calculation and does not modify Product. | Read-only; only rows that passed structural/value/duplicate validation are stored here. | IMP-PROD-001 |
-| Imports > Product source rejected rows | ProductSourceRejectedRow | Isolates malformed, invalid or normalised-duplicate Product rows. | source_row_number, column_count, raw_values, validation_errors | products.csv | Reporting and review only. | Never infer shifted values or update Product automatically. | IMP-PROD-REJECT-001 |
+| Imports > External data files | ExternalDataFile | Register and stored file for external sources by client. | file_type, source_method, uploaded_file, sha256, status, validation_summary, actors/timestamps | products.xls, stock_sth.xlsx, fuel.csv | Centralises upload, validation and audit; Fuel also supports activation/rollback. | Product/Stock are reference data; Fuel can change `fuel_levy`. Do not delete history. | IMP-EXT-001 |
+| Imports > Product source rows | ProductSourceRow | Valid Product source rows for reference and field comparison. | product_code, dimensions, cubic, quantity, weight, pallet, status, raw_data | products.xls through Product File Adapter | Does not participate in autocomplete or calculation and does not modify Product. | Read-only; only rows that passed structural/value/duplicate validation are stored here. | IMP-PROD-001 |
+| Imports > Product source rejected rows | ProductSourceRejectedRow | Isolates malformed, invalid or normalised-duplicate Product rows. | source_row_number, column_count, raw_values, validation_errors | canonical Product source records | Reporting and review only. | Never infer shifted values or update Product automatically. | IMP-PROD-REJECT-001 |
+| Hidden from Admin: Product reconciliation decisions | ProductReconciliationDecision | Stores field-level draft choices for one SKU and Product source file. | external_file, source_row, sku, group_key, field_decisions, custom_values, status | Reconciliation workspace | Builds review drafts and preview only; proposes C/P from source pallet but does not update Product. | Invalid pallet values require manual C/P; decisions are not operational changes. | IMP-PROD-RECON-001 |
+| Imports > Product reconciliation rules | ProductReconciliationRule | Stores reusable client-scoped draft choices for a reconciliation group. | client, name, group_key, field_decisions, active | Reconciliation workspace | Can prepare matching draft decisions for future uploads. | A rule is a review accelerator, not an automatic import. | IMP-PROD-RECON-RULE-001 |
 | Imports > Stock source rows | StockSourceRow | Validated `stock_sth.xlsx` rows for reference. | movement, product_code, quantity, pallet, weight, cubic, location, status, raw_data | stock_sth.xlsx | Does not participate in calculation and does not modify Product. | Read-only view; repeated SKUs are retained because they may represent multiple movements. | IMP-STOCK-001 |
 
 ## Modification rule
@@ -51,7 +53,7 @@ Before changing a record imported from Excel:
 
 | Admin location | Control | Effect |
 |---|---|---|
-| Imports -> External data files | Upload product source | Uploads `products.csv`, stores valid rows and isolates rejected rows without changing Product |
+| Imports -> External data files | Upload product source | Uploads `products.xls`, stores valid rows and isolates rejected rows without changing Product |
 | Imports -> External data files | Upload stock source | Uploads and immediately validates `stock_sth.xlsx` into StockSourceRow |
 | Product/Stock external file | Validate | Rebuilds isolated source rows for that file; no operational data change |
 | Product/Stock external file | View rows | Opens the read-only staging rows filtered by source file |
@@ -62,6 +64,23 @@ Before changing a record imported from Excel:
 Product and Stock retain client/type/file history, including the original filename. Their local filesystem directory is not available to Django and cannot be prefilled by the browser. Remote Product/Stock fetch remains a future feature and is not introduced by the remembered Fuel URL change.
 
 Product/Stock rows must never show `Activate` or `Rollback`.
+
+## Product reconciliation controls added 2026-09-21
+
+| Admin location | Control | Effect |
+|---|---|---|
+| Product external file | Product reconciliation workspace | Opens the grouped review queue for the validated file |
+| Reconciliation workspace | Save selected draft | Saves field choices only for checked rows |
+| Reconciliation workspace | Save group draft | Saves choices for the active group, with a 2,000-row safety limit |
+| Reconciliation workspace | Edit individual | Overrides field choices and custom values for one SKU |
+| Reconciliation workspace | Preview | Shows the proposed result and unresolved warnings without writing Product |
+| Reconciliation workspace | Save reusable rule | Stores a client/group rule for later Product uploads |
+| Reconciliation workspace | Apply rule to drafts | Prepares matching draft decisions; never applies them to Product |
+
+This phase has no operational Apply control. Product, Calculator, rates, zones
+and operational freight type remain unchanged. Draft C/P is proposed using
+`pallet = 0 → C` and `pallet > 0 → P`; empty, negative or non-numeric values
+are placed in the manual-review group.
 
 Important: `import_sth_excel --replace` is a separate full-workbook operation. In the selected database it deletes non-Fuel `ExternalDataFile` records and, by cascade, Product/Stock source rows. Run Excel validation batteries in an isolated database as documented in `docs/11_validation_runbook.md`.
 
@@ -100,6 +119,7 @@ It grants view/add/change for current operational configuration models, view-onl
 | `activate_fuel` | Apply validated Fuel rates |
 | `rollback_fuel` | Restore values before an activation |
 | `download_external_data_file` | Download stored source file |
+| `manage_product_reconciliation` | Save Product reconciliation drafts and reusable rules |
 
 ### Super User
 

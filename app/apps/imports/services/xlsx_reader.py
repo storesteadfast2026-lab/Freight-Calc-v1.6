@@ -7,12 +7,13 @@ import csv
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from apps.imports.models import ExternalDataFile
+if TYPE_CHECKING:
+    from apps.imports.models import ExternalDataFile
 
 
 class SourceImportError(Exception):

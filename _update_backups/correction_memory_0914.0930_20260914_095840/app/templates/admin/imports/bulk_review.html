@@ -1,0 +1,298 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .bulk-review-page { max-width: none; }
+    .bulk-review-summary { margin: 0 0 14px; }
+    .bulk-review-reference-note {
+      background: var(--darkened-bg);
+      color: var(--body-fg);
+      padding: 9px 11px;
+      margin: 10px 0 14px;
+      border: 1px solid var(--hairline-color);
+    }
+    .bulk-review-errors {
+      background: var(--selected-row);
+      color: var(--error-fg, #ba2121);
+      padding: 9px 11px;
+      margin: 10px 0;
+    }
+    .bulk-review-toolbar,
+    .bulk-review-actions {
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+    .bulk-review-toolbar label,
+    .bulk-review-actions label { display: block; margin-bottom: 4px; }
+    .bulk-review-grow { flex: 1 1 260px; }
+    .bulk-review-count { margin-left: auto; padding-bottom: 8px; }
+    .bulk-review-table-wrap { overflow-x: auto; }
+    .bulk-review-table {
+      width: 100%;
+      min-width: 1120px;
+      border-collapse: collapse;
+      border-top: 1px solid var(--hairline-color);
+    }
+    .bulk-review-table th,
+    .bulk-review-table td {
+      padding: 7px 6px;
+      border-bottom: 1px solid var(--hairline-color);
+      text-align: left;
+      vertical-align: top;
+    }
+    .bulk-review-table th { background: var(--darkened-bg); white-space: nowrap; }
+    .bulk-review-check { width: 52px; text-align: center !important; }
+    .bulk-review-row { width: 62px; }
+    .bulk-review-key { width: 125px; }
+    .bulk-review-name { width: 220px; }
+    .bulk-review-description { width: 365px; }
+    .bulk-review-comment { width: 220px; }
+    .bulk-review-action { width: 110px; text-align: right !important; }
+    .bulk-review-text {
+      min-height: 2.6em;
+      line-height: 1.3;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .bulk-review-issue { color: var(--body-quiet-color); margin-top: 4px; }
+    .bulk-review-detail td { padding-top: 4px; padding-bottom: 8px; }
+    .bulk-review-detail-list { display: flex; gap: 8px 18px; flex-wrap: wrap; }
+    .bulk-review-detail-list strong { font-weight: 600; }
+    .bulk-review-editor[hidden],
+    .bulk-review-main[hidden],
+    .bulk-review-detail[hidden] { display: none; }
+    .bulk-review-editor td { background: var(--darkened-bg); }
+    .bulk-review-field-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px 14px;
+    }
+    .bulk-review-field label { display: block; margin-bottom: 3px; }
+    .bulk-review-field input,
+    .bulk-review-field textarea { box-sizing: border-box; width: 100%; }
+    .bulk-review-field .errorlist { margin: 3px 0; }
+    .bulk-review-status { white-space: nowrap; }
+    .bulk-review-actions { padding-top: 8px; }
+    .bulk-review-action-result { margin-left: auto; color: var(--body-quiet-color); }
+    @media (max-width: 700px) {
+      .bulk-review-count,
+      .bulk-review-action-result { margin-left: 0; width: 100%; }
+    }
+  </style>
+{% endblock %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='imports' %}">Imports</a>
+    &rsaquo; <a href="{{ back_url }}">External data files</a>
+    &rsaquo; {{ source }}
+    &rsaquo; Bulk review
+  </div>
+{% endblock %}
+
+{% block content %}
+  <div class="bulk-review-page">
+    <h1>{{ title }}</h1>
+    <p class="bulk-review-summary">
+      {{ page_description }}
+      <br>{{ pending_count }} pending · {{ approved_count }} approved
+    </p>
+
+    <div class="bulk-review-reference-note">
+      <strong>Reference staging only.</strong>
+      Approval creates ProductSourceRow records and makes zero operational Product changes.
+    </div>
+
+    {% if page_errors %}
+      <div class="bulk-review-errors" role="alert">
+        {% for error in page_errors %}<div>{{ error }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    <form method="post" id="bulk-review-form" novalidate>
+      {% csrf_token %}
+      <div class="bulk-review-toolbar">
+        <div class="bulk-review-grow">
+          <label for="bulk-review-search">Search SKU or text</label>
+          <input id="bulk-review-search" type="search" placeholder="Start typing to filter…">
+        </div>
+        <div>
+          <label for="bulk-review-status-filter">Review status</label>
+          <select id="bulk-review-status-filter">
+            <option value="all">All rows</option>
+            <option value="selectable">Pending and proposed</option>
+            <option value="approved">Approved</option>
+          </select>
+        </div>
+        <label>
+          <input id="bulk-review-select-visible" type="checkbox">
+          Select all visible
+        </label>
+        <div class="bulk-review-count">
+          <strong id="bulk-review-visible-count">{{ rows|length }}</strong> shown ·
+          <strong id="bulk-review-selected-count">0</strong> selected
+        </div>
+      </div>
+
+      <div class="bulk-review-table-wrap">
+        <table class="bulk-review-table">
+          <thead>
+            <tr>
+              <th class="bulk-review-check">Select</th>
+              <th class="bulk-review-row">Row</th>
+              <th class="bulk-review-key">SKU</th>
+              <th class="bulk-review-name">Proposed name</th>
+              <th class="bulk-review-description">Proposed description</th>
+              <th class="bulk-review-comment">Comment</th>
+              <th>Status</th>
+              <th class="bulk-review-action">Action</th>
+            </tr>
+          </thead>
+          <tbody id="bulk-review-body">
+            {% for review in rows %}
+              <tr class="bulk-review-main"
+                  data-review-id="{{ review.id }}"
+                  data-status="{% if review.selectable %}selectable{% else %}approved{% endif %}"
+                  data-search="{{ review.record_key|lower }} {% for cell in review.display_cells %}{{ cell.value|lower }} {% endfor %}">
+                <td class="bulk-review-check">
+                  <input type="checkbox" name="selected" value="{{ review.id }}"
+                         class="bulk-review-select" aria-label="Select source row {{ review.row_label }}"
+                         {% if not review.selectable %}disabled{% endif %}>
+                </td>
+                <td class="bulk-review-row">{{ review.row_label }}</td>
+                <td class="bulk-review-key">
+                  <code>{{ review.record_key|default:"—" }}</code>
+                  <div class="bulk-review-issue">{{ review.issue }}</div>
+                </td>
+                {% for cell in review.display_cells %}
+                  <td class="{{ cell.css_class }}"><div class="bulk-review-text">{{ cell.value|default:"—" }}</div></td>
+                {% endfor %}
+                <td class="bulk-review-status">{{ review.status }}</td>
+                <td class="bulk-review-action">
+                  {% if review.selectable %}
+                    <button type="button" class="button bulk-review-edit" data-review-id="{{ review.id }}">Edit</button>
+                  {% endif %}
+                  <a href="{{ review.edit_url }}">Details</a>
+                </td>
+              </tr>
+              <tr class="bulk-review-detail" data-review-id="{{ review.id }}">
+                <td></td>
+                <td colspan="7">
+                  <div class="bulk-review-detail-list">
+                    {% for label, value in review.detail_values %}
+                      <span><strong>{{ label }}:</strong> {{ value }}</span>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+              <tr class="bulk-review-editor" data-review-id="{{ review.id }}" hidden>
+                <td></td>
+                <td colspan="7">
+                  {{ review.form.non_field_errors }}
+                  <div class="bulk-review-field-grid">
+                    {% for field in review.edit_fields %}
+                      <div class="bulk-review-field">
+                        {{ field.errors }}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="8">No rejected Product rows are available for this source.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bulk-review-actions">
+        <div class="bulk-review-grow">
+          <label for="bulk-review-note">Review note for selected rows</label>
+          <input id="bulk-review-note" type="text" name="bulk_review_note"
+                 value="{{ request.POST.bulk_review_note }}"
+                 placeholder="Example: Checked against Translogic">
+        </div>
+        <button type="submit" class="button" name="_save_selected">Save selected proposals</button>
+        <button type="submit" class="button default" name="_approve_selected">Approve selected (<span id="bulk-review-button-count">0</span>)</button>
+        <span class="bulk-review-action-result" id="bulk-review-action-result" aria-live="polite">
+          Operational Product: 0 changes.
+        </span>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    (() => {
+      const form = document.getElementById('bulk-review-form');
+      const body = document.getElementById('bulk-review-body');
+      const search = document.getElementById('bulk-review-search');
+      const statusFilter = document.getElementById('bulk-review-status-filter');
+      const selectVisible = document.getElementById('bulk-review-select-visible');
+      const visibleCount = document.getElementById('bulk-review-visible-count');
+      const selectedCount = document.getElementById('bulk-review-selected-count');
+      const buttonCount = document.getElementById('bulk-review-button-count');
+      const actionResult = document.getElementById('bulk-review-action-result');
+
+      function relatedRows(mainRow) {
+        return [...body.querySelectorAll(`[data-review-id="${mainRow.dataset.reviewId}"]`)];
+      }
+
+      function updateCounts() {
+        const selected = body.querySelectorAll('.bulk-review-select:checked').length;
+        selectedCount.textContent = selected;
+        buttonCount.textContent = selected;
+        actionResult.textContent = selected
+          ? `${selected} selected. Operational Product: 0 changes.`
+          : 'Operational Product: 0 changes.';
+      }
+
+      function applyFilter() {
+        const query = search.value.trim().toLowerCase();
+        let shown = 0;
+        body.querySelectorAll('.bulk-review-main').forEach(mainRow => {
+          const matchesText = !query || mainRow.dataset.search.includes(query);
+          const matchesStatus = statusFilter.value === 'all' || mainRow.dataset.status === statusFilter.value;
+          const visible = matchesText && matchesStatus;
+          relatedRows(mainRow).forEach(row => row.hidden = !visible || row.classList.contains('bulk-review-editor'));
+          if (visible) shown++;
+        });
+        visibleCount.textContent = shown;
+        selectVisible.checked = false;
+      }
+
+      search.addEventListener('input', applyFilter);
+      statusFilter.addEventListener('change', applyFilter);
+      selectVisible.addEventListener('change', () => {
+        body.querySelectorAll('.bulk-review-main:not([hidden]) .bulk-review-select:not(:disabled)')
+          .forEach(checkbox => checkbox.checked = selectVisible.checked);
+        updateCounts();
+      });
+      body.addEventListener('change', event => {
+        if (event.target.classList.contains('bulk-review-select')) updateCounts();
+      });
+      body.addEventListener('click', event => {
+        const button = event.target.closest('.bulk-review-edit');
+        if (!button) return;
+        const editor = body.querySelector(`.bulk-review-editor[data-review-id="${button.dataset.reviewId}"]`);
+        const opening = editor.hidden;
+        editor.hidden = !opening;
+        button.textContent = opening ? 'Close edit' : 'Edit';
+        if (opening) editor.querySelector('input, textarea, select')?.focus();
+      });
+      form.addEventListener('submit', event => {
+        if (!body.querySelector('.bulk-review-select:checked')) {
+          event.preventDefault();
+          actionResult.textContent = 'Select at least one pending row.';
+        }
+      });
+    })();
+  </script>
+{% endblock %}

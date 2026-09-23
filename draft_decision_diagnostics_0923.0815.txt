@@ -1,0 +1,23 @@
+WORK.CALC - DRAFT DECISION EXPORT DIAGNOSTICS
+====================================================================================================
+Source file: id=11 filename=products.xls
+Operational Products: 229
+Matched: 229
+Operational only: 0
+
+CANDIDATE RECONCILIATION/MEMORY MODELS
+----------------------------------------------------------------------------------------------------
+carriers.ClientCarrierConfig: id, client, carrier_service, customer_code, ratecard, fuel_levy, fuel_levy_source, fuel_levy_updated_at, fuel_data_file, extra_surcharge, uprate, cubic_conversion, tailgate_enabled, warehouse_handling_enabled, fixed_handling_charge, hand_unload_enabled, subzone_enabled, area_enabled, overlength_enabled, pallet_enabled, carton_enabled, zone_enabled, postcode_zones_enabled, empty_rate_enabled, base_status, order_ready_rule, active
+imports.ProductSourceRejectedRow: id, external_file, source_row_number, column_count, raw_values, validation_errors, repair_status, proposed_data, review_note, reviewed_by, reviewed_at, staged_row, created_at
+imports.ProductReconciliationDecision: id, external_file, product_code_normalized, source_row_number, row_status, group_key, field_decisions, custom_values, row_action, decision_status, notes, reviewed_by, reviewed_at, applied_by, applied_at, apply_batch_id, created_at
+imports.ProductReconciliationRule: id, client, name, group_key, field_decisions, notes, active, created_by, created_at, updated_at
+imports.ExternalDataCorrectionMemory: id, workflow_key, client, record_key, source_fingerprint, proposal_fingerprint, source_data, approved_data, approval_note, origin_external_file, approved_by, approved_at, last_used_at, use_count, is_active
+imports.ExternalDataReviewItem: id, external_file, row_key, entity_type, source_data, current_data, diagnostic_data, proposed_action, decision, notes, corrected_suburb, corrected_state, corrected_postcode, selected_historical_suburb_id, is_current, reviewed_by, reviewed_at, applied_at, applied_result, created_at, updated_at
+
+EXPORT SUMMARY
+----------------------------------------------------------------------------------------------------
+Rows exported: 229
+Draft decisions parsed: 0
+SAFE_CANDIDATE: 0
+REVIEW: 0
+UNKNOWN_DRAFT: 229

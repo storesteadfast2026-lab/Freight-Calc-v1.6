@@ -16,6 +16,8 @@
 - `ExternalDataFile`
 - `ProductSourceRow`
 - `ProductSourceRejectedRow`
+- `ProductReconciliationDecision`
+- `ProductReconciliationRule`
 - `StockSourceRow`
 - `AuditEvent`
 
@@ -28,11 +30,38 @@ The design keeps client-specific products, rates, zones, configurations and exte
 `ProductSourceRow`, `ProductSourceRejectedRow` and `StockSourceRow` are isolated,
 read-only staging/reference tables associated with an `ExternalDataFile`:
 
-- validating `products.csv` replaces only the valid and rejected staging rows for that uploaded Product source file;
+- validating `products.xls` replaces only the valid and rejected staging rows for that uploaded Product source file;
 - validating `stock_sth.xlsx` replaces only the rows for that uploaded Stock source file;
 - neither process changes `Product`, `FreightRate`, `FreightZone`, `ClientCarrierConfig` or calculation logic;
 - each source row retains raw source data and validation information;
-- rejected Product rows are isolated and never coerced into the 13-column schema.
+- rejected Product rows are isolated and never coerced into the 13-field canonical schema;
+- format-specific XLS/CSV/XLSX parsing finishes before any staging write begins;
+- additional XLS columns remain available in each row's `raw_data` without changing the operational Product schema.
+
+## Product reconciliation drafts
+
+`ProductReconciliationDecision` stores one field-level review proposal for a
+Product SKU in a specific `ExternalDataFile`. It records the source row,
+workspace group, chosen authority per field, optional custom values, review
+state and reviewer timestamps. Its uniqueness boundary is the source file plus
+normalised SKU.
+
+`ProductReconciliationRule` stores a named, client-scoped set of field choices
+for one reconciliation group. A rule can prepare decisions for a later Product
+source file, but it cannot update Product by itself.
+
+```text
+ExternalDataFile 1 ─── N ProductReconciliationDecision
+ProductSourceRow  1 ─── 0..1 ProductReconciliationDecision
+Client            1 ─── N ProductReconciliationRule
+```
+
+Both models are deliberately outside the freight engine. Decisions and rules
+are draft/reference data only: they do not change `Product`, Calculator, rates,
+zones or operational C/P. The workspace proposes freight type from the Product
+source `pallet` value: zero proposes `C`, a positive value proposes `P`, and a
+missing, negative or non-numeric value requires manual review. The proposal is
+not written to `Product` in this phase.
 
 ## External-file provenance
 
