@@ -8,6 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.imports.models import ExternalDataFile, StockSourceRow
+from apps.clients.models import Client
 from apps.imports.services.audit import create_audit_event
 from apps.imports.services.xlsx_reader import (
     SourceImportError,
@@ -19,6 +20,7 @@ from apps.imports.services.xlsx_reader import (
     value_to_text,
 )
 from apps.products.models import Product
+from apps.products.identity import normalize_customer, product_identity
 
 
 STOCK_ALIASES = {
@@ -155,10 +157,17 @@ def validate_stock_source_file(external_file: ExternalDataFile, *, actor=None, r
         if not parsed:
             raise SourceImportError('No valid stock rows were found in the workbook.')
 
-        source_skus = {row['product_code_normalized'] for row in parsed}
+        client_codes = set(Client.objects.filter(active=True).values_list('code', flat=True))
+        source_skus = {
+            (normalize_customer(row['customer']) or external_file.client.code, row['product_code_normalized'])
+            for row in parsed
+        }
+        unknown = {client for client, _ in source_skus if client not in client_codes}
+        if unknown:
+            raise SourceImportError('Unknown or inactive Client code(s) in Stock: ' + ', '.join(sorted(unknown)))
         django_skus = {
-            normalize_sku(value)
-            for value in Product.objects.filter(client=external_file.client).values_list('sku', flat=True)
+            (client, normalize_sku(sku))
+            for client, sku in Product.objects.filter(client__code__in=client_codes).values_list('client__code', 'sku')
         }
         duplicate_file = (
             ExternalDataFile.objects.filter(
@@ -193,7 +202,7 @@ def validate_stock_source_file(external_file: ExternalDataFile, *, actor=None, r
             'duplicate_skus': duplicate_codes,
             'django_products_matched': len(source_skus & django_skus),
             'stock_products_not_in_django': len(source_skus - django_skus),
-            'stock_products_not_in_django_preview': sorted(source_skus - django_skus)[:25],
+            'stock_products_not_in_django_preview': [product_identity(*key) for key in sorted(source_skus - django_skus)[:25]],
             'duplicate_file_id': duplicate_file.pk if duplicate_file else None,
             'duplicate_file_status': duplicate_file.status if duplicate_file else None,
             'reference_only': True,
@@ -204,6 +213,7 @@ def validate_stock_source_file(external_file: ExternalDataFile, *, actor=None, r
                 {
                     'row': row['source_row_number'],
                     'sku': row['product_code_normalized'],
+                    'customer': normalize_customer(row['customer']),
                     'name': row['sql_name'],
                     'quantity': str(row['quantity']) if row['quantity'] is not None else '',
                     'pallet': str(row['pallet']) if row['pallet'] is not None else '',

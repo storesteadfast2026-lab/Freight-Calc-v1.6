@@ -1,0 +1,56 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p><a href="{{ back_url }}">Back to Product reconciliation</a> · {{ source.original_filename }} (ID {{ source.pk }})</p>
+<p>Work on selected physical differences using the same immutable Source. Each applied round retains its decisions and can be rolled back in reverse order.</p>
+{% if not round or round.status != 'DRAFT' %}
+<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="start"><button type="submit" class="button default">Start correction round</button></form>
+{% endif %}
+<h2>Correction history</h2>
+<ul>{% for item in history %}
+<li><a href="?mode=correction&round={{ item.pk }}">Round {{ item.pk }}</a> · {{ item.status }} · {{ item.decisions.count }} decision(s) · {{ item.created_at }}{% if item.applied_at %} · applied {{ item.applied_at }}{% endif %}</li>
+{% empty %}<li>No correction rounds yet.</li>{% endfor %}</ul>
+{% if round %}
+<h2>Round {{ round.pk }} · {{ round.status }}</h2>
+<p>Current physical differences: {{ physical_count }} · SKUs corrected in active rounds: {{ reviewed_count }}. A reviewed SKU can still differ from Source when another operational value was intentionally retained.</p>
+<p><a href="?mode=correction&round={{ round.pk }}">Show unreviewed</a> · <a href="?mode=correction&round={{ round.pk }}&show=all">Show all physical differences, including reviewed</a></p>
+{% if round.status == 'DRAFT' %}
+<p>Choose any number of products, one at a time. Saving a draft does not change a Product.</p>
+<form method="get"><input type="hidden" name="mode" value="correction"><input type="hidden" name="round" value="{{ round.pk }}">{% if request.GET.show == 'all' %}<input type="hidden" name="show" value="all">{% endif %}<label>Find SKU or name <input type="search" name="q" value="{{ query }}"></label><button type="submit" class="button">Search</button></form>
+<a class="button" href="?mode=correction&round={{ round.pk }}&preview=1">Preview correction ({{ plan.decision_count }})</a>
+<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="correction_action" value="discard"><input type="hidden" name="round_id" value="{{ round.pk }}"><button type="submit" class="button" onclick="return confirm('Discard this draft round? Products will not change.');">Discard draft round</button></form>
+{% endif %}
+{% if round.status == 'DRAFT' and not preview_mode %}
+{% if edit_row %}
+<section id="correction-editor" style="margin:14px 0;padding:14px;border:1px solid var(--hairline-color);background:var(--body-bg)"><h3>Review {{ edit_row.sku }}</h3>
+{% if decision_history %}<h4>Decision history for {{ edit_row.sku }}</h4><ul>{% for entry in decision_history %}<li>{{ entry.label }} · {{ entry.date }} · {{ entry.decisions }} · {{ entry.reason }}</li>{% endfor %}</ul>{% endif %}
+<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="save"><input type="hidden" name="round_id" value="{{ round.pk }}">{{ individual_form.sku }}
+<table><thead><tr><th>Field</th><th>Source</th><th>Current Calculator</th><th>Choose</th><th>Custom value if needed</th></tr></thead><tbody>
+<tr><td>Name</td><td>{{ edit_row.source_values.name }}</td><td>{{ edit_row.operational_values.name }}</td><td>{{ individual_form.name_authority }}</td><td>{{ individual_form.custom_name }}</td></tr>
+<tr><td>Description</td><td>{{ edit_row.source_values.description }}</td><td>{{ edit_row.operational_values.description }}</td><td>{{ individual_form.description_authority }}</td><td>{{ individual_form.custom_description }}</td></tr>
+<tr><td>Dimensions (m)</td><td>{{ edit_row.source_values.length_m }} × {{ edit_row.source_values.width_m }} × {{ edit_row.source_values.height_m }}</td><td>{{ edit_row.operational_values.length_m }} × {{ edit_row.operational_values.width_m }} × {{ edit_row.operational_values.height_m }}</td><td>{{ individual_form.dimensions_authority }}</td><td>{{ individual_form.custom_length_m }} {{ individual_form.custom_width_m }} {{ individual_form.custom_height_m }}</td></tr>
+<tr><td>Weight (kg)</td><td>{{ edit_row.source_values.weight_kg }}</td><td>{{ edit_row.operational_values.weight_kg }}</td><td>{{ individual_form.weight_authority }}</td><td>{{ individual_form.custom_weight_kg }}</td></tr>
+<tr><td>Cubic (m³)</td><td>{{ edit_row.source_values.cubic_m3 }}</td><td>{{ edit_row.operational_values.cubic_m3 }}</td><td>{{ individual_form.cubic_authority }}</td><td>{{ individual_form.custom_cubic_m3 }}</td></tr>
+<tr><td>Case/Pallet</td><td>{{ edit_row.source_values.freight_type }}</td><td>{{ edit_row.operational_values.freight_type }}</td><td>{{ individual_form.freight_type_authority }}</td><td>{{ individual_form.custom_freight_type }}</td></tr>
+</tbody></table>
+<label>Reason (required) {{ individual_form.notes }}</label>
+<label><input type="checkbox" name="confirm_source_dimensions" value="yes"> I verified the Source dimensions and their units if a scale warning appears.</label>
+<button type="submit" class="button default">Save correction draft</button></form></section>
+{% endif %}
+<table><thead><tr><th>SKU</th><th>Difference</th><th>Draft in this round</th><th>Action</th></tr></thead><tbody>
+{% for row in page_obj %}<tr><td>{{ row.sku }}</td><td>{{ row.changed_fields }}{% for warning in row.warnings %}<br><small>{{ warning }}</small>{% endfor %}</td><td>{% for decision in round.decisions.all %}{% if decision.sku == row.sku %}Saved · {{ decision.notes }}{% endif %}{% endfor %}</td><td><a href="?mode=correction&round={{ round.pk }}&edit={{ row.sku|urlencode }}{% if request.GET.show == 'all' %}&show=all{% endif %}#correction-editor" >Review {{ row.sku }}</a></td></tr>{% empty %}<tr><td colspan="4">No matching physical differences.</td></tr>{% endfor %}</tbody></table>
+{% if page_obj.has_previous %}<a href="?mode=correction&round={{ round.pk }}&q={{ query|urlencode }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
+{% if page_obj.has_next %}<a href="?mode=correction&round={{ round.pk }}&q={{ query|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+
+{% endif %}
+{% if preview_mode or round.status != 'DRAFT' %}
+<h3>{% if round.status == 'DRAFT' %}Preview correction{% else %}Applied decision history{% endif %}</h3>
+{% if plan.blockers %}<p><strong>Apply blocked:</strong></p><ul>{% for blocker in plan.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>{% endif %}
+<table><thead><tr><th>SKU</th><th>Authorities / reason</th><th>Current → proposed values</th><th>Issues</th></tr></thead><tbody>
+{% for item in plan.items %}<tr><td>{{ item.row.sku }}</td><td>{{ item.decision.field_decisions }}<br>{{ item.decision.notes }}</td><td>{{ item.row.operational_values }}<br>→ {{ item.proposed_values }}</td><td>{% for blocker in item.blockers %}{{ blocker }}<br>{% endfor %}</td></tr>{% empty %}<tr><td colspan="4">No decisions saved for this round.</td></tr>{% endfor %}
+</tbody></table>
+{% if round.status == 'DRAFT' and plan.decision_count %}<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="apply"><input type="hidden" name="round_id" value="{{ round.pk }}"><label><input type="checkbox" name="confirm_apply" value="yes"> I reviewed every proposed change</label><button type="submit" class="button default"{% if not plan.can_apply %} disabled{% endif %}>Apply {{ plan.decision_count }} correction(s)</button></form>{% endif %}
+{% if round.status == 'APPLIED' %}<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="rollback"><input type="hidden" name="round_id" value="{{ round.pk }}"><label><input type="checkbox" name="confirm_rollback" value="yes"> Confirm rollback of this correction round</label><button type="submit" class="button">Rollback correction round</button></form>{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}

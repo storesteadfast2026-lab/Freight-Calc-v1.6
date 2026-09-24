@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied
 from django.template.response import TemplateResponse
 from django.urls import reverse
 
@@ -87,7 +88,7 @@ class ReadOnlyReconciliationWorkflow(ABC):
         self.admin_site = admin_site
 
     @abstractmethod
-    def get_source(self, object_id):
+    def get_source(self, request, object_id):
         raise NotImplementedError
 
     @abstractmethod
@@ -103,7 +104,7 @@ class ReadOnlyReconciliationWorkflow(ABC):
     def __call__(self, request, object_id):
         if not self.has_permission(request):
             raise PermissionDenied
-        source = self.get_source(object_id)
+        source = self.get_source(request, object_id)
         rows, summary = self.build_reconciliation(source)
         search = str(request.GET.get('q') or '').strip().lower()
         status = str(request.GET.get('status') or 'NEEDS_REVIEW').upper()
@@ -157,9 +158,16 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
         'Group, review and save draft Product decisions before any operational change.'
     )
 
-    def get_source(self, object_id):
+    def get_source(self, request, object_id):
+        if request.user.is_superuser:
+            sources = ExternalDataFile.objects.all()
+        else:
+            try:
+                sources = ExternalDataFile.objects.filter(client__in=allowed_clients_for(request.user))
+            except CalculatorAccessDenied:
+                raise PermissionDenied
         return get_object_or_404(
-            ExternalDataFile,
+            sources,
             pk=object_id,
             file_type='PRODUCTS',
             status='VALIDATED',
@@ -554,7 +562,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
     def __call__(self, request, object_id):
         if not self.has_permission(request):
             raise PermissionDenied
-        source = self.get_source(object_id)
+        source = self.get_source(request, object_id)
         if request.GET.get('mode') == 'correction' or request.POST.get('correction_action'):
             return self._correction_view(request, source)
         active_apply = has_active_product_apply(source)

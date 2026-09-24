@@ -19,6 +19,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from apps.clients.models import Client
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied
 from apps.imports.admin_bulk_review import ProductRejectedRowsBulkReview
 from apps.imports.admin_reconciliation import ProductReconciliationWorkflow
 from apps.imports.admin_ftp_inbox import FtpInboxAdminMixin
@@ -500,6 +501,29 @@ class ExternalDataReviewItemInline(admin.TabularInline):
 
 @admin.register(ExternalDataFile)
 class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.ModelAdmin):
+    def _clients(self, request):
+        if request.user.is_superuser:
+            return Client.objects.filter(active=True)
+        try:
+            return allowed_clients_for(request.user)
+        except CalculatorAccessDenied:
+            return Client.objects.none()
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(client__in=self._clients(request))
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'client':
+            kwargs['queryset'] = self._clients(request)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if not self._clients(request).filter(pk=obj.client_id).exists():
+            raise PermissionDenied('This Client is not authorised for the current user.')
+        super().save_model(request, obj, form, change)
     change_form_template = 'admin/imports/externaldatafile/change_form_with_postcodes_apply.html'
     form = ExternalDataFileAdminForm
     change_list_template = 'admin/imports/externaldatafile/change_list.html'
@@ -660,7 +684,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
         ):
             raise PermissionDenied('Missing Product reconciliation permission.')
         obj = get_object_or_404(
-            ExternalDataFile,
+            self.get_queryset(request),
             pk=object_id,
             file_type='PRODUCTS',
             status='VALIDATED',
@@ -1182,6 +1206,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
             request.FILES or None,
             expected_filename=expected_filename,
             allowed_extensions=allowed_extensions,
+            allowed_clients=self._clients(request),
         )
         if request.method == 'POST' and form.is_valid():
             uploaded = form.cleaned_data['uploaded_file']
@@ -1280,7 +1305,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
     def validate_reference_source_view(self, request, object_id):
         self._require_permission(request, 'imports.validate_external_data_file')
         obj = get_object_or_404(
-            ExternalDataFile,
+            self.get_queryset(request),
             pk=object_id,
             file_type__in=REFERENCE_FILE_TYPES,
         )
@@ -1366,7 +1391,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
 
     def validate_fuel_view(self, request, object_id):
         self._require_permission(request, 'imports.validate_external_data_file')
-        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        obj = get_object_or_404(self.get_queryset(request), pk=object_id, file_type='FUEL')
         if request.method == 'POST':
             try:
                 summary = validate_fuel_file(obj, actor=request.user, request=request)
@@ -1389,7 +1414,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
 
     def activate_fuel_view(self, request, object_id):
         self._require_permission(request, 'imports.activate_fuel')
-        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        obj = get_object_or_404(self.get_queryset(request), pk=object_id, file_type='FUEL')
         form = FuelActivationForm(request.POST or None, user=request.user)
         if request.method == 'POST' and form.is_valid():
             try:
@@ -1420,7 +1445,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
 
     def rollback_fuel_view(self, request, object_id):
         self._require_permission(request, 'imports.rollback_fuel')
-        obj = get_object_or_404(ExternalDataFile, pk=object_id, file_type='FUEL')
+        obj = get_object_or_404(self.get_queryset(request), pk=object_id, file_type='FUEL')
         form = FuelRollbackForm(request.POST or None)
         if request.method == 'POST' and form.is_valid():
             try:
@@ -1462,7 +1487,18 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
 
     def download_view(self, request, object_id):
         self._require_permission(request, 'imports.download_external_data_file')
-        obj = get_object_or_404(ExternalDataFile, pk=object_id)
+        obj = get_object_or_404(self.get_queryset(request), pk=object_id)
+        summary = obj.validation_summary or {}
+        if obj.file_type == 'PRODUCTS' and summary.get('source_customer_column') and (
+            summary.get('partition_client_codes') or summary.get('partition_source_id')
+        ) and not request.user.is_superuser:
+            from apps.authentication_gateway.models import CalculatorUserProfile
+            try:
+                profile = request.user.calculator_profile
+            except CalculatorUserProfile.DoesNotExist:
+                raise PermissionDenied('The complete workbook includes other Clients.')
+            if profile.role != 'INTERNAL_USER' or profile.client_scope != 'ALL_CLIENTS':
+                raise PermissionDenied('The complete workbook includes other Clients.')
         if obj.uploaded_file:
             try:
                 obj.uploaded_file.open('rb')
@@ -1486,7 +1522,7 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
     def download_product_validation_report_view(self, request, object_id):
         self._require_permission(request, 'imports.download_external_data_file')
         obj = get_object_or_404(
-            ExternalDataFile,
+            self.get_queryset(request),
             pk=object_id,
             file_type='PRODUCTS',
             status='VALIDATED',
@@ -1503,6 +1539,15 @@ class ExternalDataFileAdmin(FtpInboxAdminMixin, PostcodesApplyAdminMixin, admin.
 class ReadOnlySourceRowAdmin(admin.ModelAdmin):
     list_per_page = 100
     show_full_result_count = False
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        try:
+            return qs.filter(external_file__client__in=allowed_clients_for(request.user))
+        except CalculatorAccessDenied:
+            return qs.none()
 
     def has_add_permission(self, request):
         return False
@@ -1531,6 +1576,14 @@ class ProductSourceRowAdmin(ReadOnlySourceRowAdmin):
 
 @admin.register(ProductSourceRejectedRow)
 class ProductSourceRejectedRowAdmin(admin.ModelAdmin):
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        try:
+            return qs.filter(external_file__client__in=allowed_clients_for(request.user))
+        except CalculatorAccessDenied:
+            return qs.none()
     form = ProductSourceRejectedRowReviewForm
     change_form_template = 'admin/imports/productsourcerejectedrow/change_form.html'
     list_display = (
@@ -1688,6 +1741,14 @@ class ProductReconciliationDecisionAdmin(ReadOnlySourceRowAdmin):
 
 @admin.register(ExternalDataCorrectionMemory)
 class ExternalDataCorrectionMemoryAdmin(admin.ModelAdmin):
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        try:
+            return qs.filter(client__in=allowed_clients_for(request.user))
+        except CalculatorAccessDenied:
+            return qs.none()
     change_list_template = (
         'admin/imports/externaldatacorrectionmemory/change_list.html'
     )
@@ -1788,6 +1849,14 @@ class ExternalDataCorrectionMemoryAdmin(admin.ModelAdmin):
 
 @admin.register(ProductReconciliationRule)
 class ProductReconciliationRuleAdmin(admin.ModelAdmin):
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        try:
+            return qs.filter(client__in=allowed_clients_for(request.user))
+        except CalculatorAccessDenied:
+            return qs.none()
     list_display = ('name', 'client', 'group_key', 'active', 'created_by', 'updated_at')
     list_filter = ('client', 'group_key', 'active')
     search_fields = ('name', 'notes')

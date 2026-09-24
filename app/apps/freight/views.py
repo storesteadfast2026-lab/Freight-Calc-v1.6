@@ -17,6 +17,7 @@ from apps.authentication_gateway.services import (
 )
 from apps.locations.models import Suburb, FromAddress
 from apps.products.models import Product
+from apps.products.selection import validate_product_selection
 
 from .services.dtos import FreightRequest, FreightLine
 from .services.calculator import FreightCalculatorService
@@ -93,6 +94,7 @@ def product_autocomplete(request: HttpRequest):
         )
     data = [
         {
+            'id': p.pk,
             'sku': p.sku,
             'label': f'{p.sku}',
             'length_m': str(p.length_m),
@@ -123,6 +125,10 @@ def calculate_freight(request: HttpRequest):
             request.user,
             payload.get('client_code'),
         )
+        for line in payload.get('lines', []):
+            if line.get('product_id') not in (None, ''):
+                validate_product_selection(client, line.get('sku'),
+                                           product_id=line['product_id'])
         lines = [FreightLine(
             sku=line.get('sku') or None,
             quantity=_decimal(line.get('quantity'), '0'),
@@ -151,6 +157,8 @@ def calculate_freight(request: HttpRequest):
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON request body.'}, status=400)
     except ValidationError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
     except Exception as exc:
         return JsonResponse(

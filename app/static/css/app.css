@@ -594,3 +594,8 @@ label{position:relative}.dropdown{left:0;right:auto;top:100%;box-sizing:border-b
     transform:translateX(-50%);
   }
 }
+
+#active_client option {
+    color: #0b2d55;
+    background-color: #ffffff;
+}

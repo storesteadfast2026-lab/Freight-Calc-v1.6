@@ -147,6 +147,7 @@ class ProductSourceRow(models.Model):
         limit_choices_to={'file_type': 'PRODUCTS'},
     )
     source_row_number = models.PositiveIntegerField()
+    customer_code = models.CharField(max_length=100, blank=True, default='', db_index=True)
     product_code_raw = models.CharField(max_length=255)
     product_code_normalized = models.CharField(max_length=255, db_index=True)
     name = models.CharField(max_length=500, blank=True)
@@ -175,6 +176,7 @@ class ProductSourceRow(models.Model):
         ]
         indexes = [
             models.Index(fields=['external_file', 'product_code_normalized'], name='imp_prod_file_sku_idx'),
+            models.Index(fields=['external_file', 'customer_code', 'product_code_normalized'], name='imp_prod_file_cust_sku_idx'),
         ]
 
     def __str__(self):
@@ -197,6 +199,7 @@ class ProductSourceRejectedRow(models.Model):
         limit_choices_to={'file_type': 'PRODUCTS'},
     )
     source_row_number = models.PositiveIntegerField()
+    customer_code = models.CharField(max_length=100, blank=True, default='', db_index=True)
     column_count = models.PositiveIntegerField(null=True, blank=True)
     raw_values = models.JSONField(default=list, blank=True)
     validation_errors = models.JSONField(default=list, blank=True)
@@ -257,7 +260,7 @@ class ProductReconciliationDecision(models.Model):
         related_name='product_reconciliation_decisions',
         limit_choices_to={'file_type': 'PRODUCTS'},
     )
-    product_code_normalized = models.CharField(max_length=255, db_index=True)
+    product_code_normalized = models.CharField(max_length=400, db_index=True)
     source_row_number = models.PositiveIntegerField(null=True, blank=True)
     row_status = models.CharField(max_length=30)
     group_key = models.CharField(max_length=80, db_index=True)
@@ -329,7 +332,7 @@ class ProductCorrectionDecision(models.Model):
     round = models.ForeignKey(
         ProductCorrectionRound, on_delete=models.PROTECT, related_name='decisions'
     )
-    sku = models.CharField(max_length=255)
+    sku = models.CharField(max_length=400)
     field_decisions = models.JSONField(default=dict)
     custom_values = models.JSONField(default=dict, blank=True)
     notes = models.TextField()
@@ -395,7 +398,7 @@ class ExternalDataCorrectionMemory(models.Model):
         on_delete=models.CASCADE,
         related_name='external_data_correction_memories',
     )
-    record_key = models.CharField(max_length=255, blank=True, db_index=True)
+    record_key = models.CharField(max_length=400, blank=True, db_index=True)
     source_fingerprint = models.CharField(max_length=64, db_index=True)
     proposal_fingerprint = models.CharField(max_length=64, db_index=True)
     source_data = models.JSONField(default=dict, blank=True)

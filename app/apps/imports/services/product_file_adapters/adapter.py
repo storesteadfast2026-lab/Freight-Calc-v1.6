@@ -64,7 +64,7 @@ class CsvProductFileReader:
             content,
             aliases=aliases,
             required_fields=required_fields,
-            expected_column_count=expected_csv_column_count,
+            expected_column_count=None,  # 13 legacy or 14 with CUSTOMER; validated by importer.
         )
         return ProductFileReadResult(
             source_format=self.format_name,

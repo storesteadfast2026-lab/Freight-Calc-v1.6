@@ -1,0 +1,54 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260924132616
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Client_Identity_0924.1247\Calc_Client_Identity_0924.1247\Apply_Update.ps1
+Process ID: 33368
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+
+
+
+[+] copy 1/1
+ ✔ freight-calc-v16-db-1 Copied freight-calc-v16-db-1:/tmp/calc_customer_a2dafe9a97f84a2bad79debcd44d6543.dump t... 0.1s
+
+[+] stop 1/1
+ ✔ Container freight-calc-v16-web-1 Stopped                                                                         3.3s
+Container freight-calc-v16-web-run-146839432fe5 Creating
+Container freight-calc-v16-web-run-146839432fe5 Created
+Found 204 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+........................................................................................................................
+...............................Repair review cleanup complete: 1 file(s), 1 staging object(s) removed.
+.....................................................
+----------------------------------------------------------------------
+Ran 204 tests in 5.599s
+
+OK
+Destroying test database for alias 'default'...
+Operations to perform:
+  Apply all migrations: admin, audit, auth, authentication_gateway, carriers, clients, contenttypes, imports, locations,
+ products, rates, saved_estimates, sessions
+Running migrations:
+  Applying products.0003_restore_client_sku_identity... OK
+
+
+
+Client + SKU identity installed. Database migrated and web restarted.
+Backups: C:\Docker-Projects\Freight-Calc-v1.6\update_backups\Calc_Client_Identity_0924.1247
+**********************
+Windows PowerShell transcript end
+End time: 20260924132643
+**********************

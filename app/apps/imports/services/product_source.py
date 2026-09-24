@@ -9,6 +9,8 @@ from typing import Any
 
 from django.db import transaction
 from django.utils import timezone
+from apps.clients.models import Client
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied
 
 from apps.imports.models import (
     ExternalDataFile,
@@ -27,9 +29,11 @@ from apps.imports.services.xlsx_reader import (
     value_to_text,
 )
 from apps.products.models import Product
+from apps.products.identity import normalize_customer, product_identity, valid_customer
 
 
 PRODUCT_ALIASES = {
+    'customer': ('customer', 'customer code', 'customer_code'),
     'code': ('code', 'product code', 'product_code', 'sku'),
     'name': ('name', 'product name', 'product_name'),
     'description': ('description', 'product description', 'product_description'),
@@ -44,7 +48,7 @@ PRODUCT_ALIASES = {
     'comment': ('comment', 'comments', 'notes'),
     'status': ('status', 'product status', 'product_status'),
 }
-PRODUCT_REQUIRED_FIELDS = tuple(PRODUCT_ALIASES)
+PRODUCT_REQUIRED_FIELDS = tuple(field for field in PRODUCT_ALIASES if field != 'customer')
 PRODUCT_CSV_COLUMN_COUNT = 13
 
 
@@ -53,7 +57,7 @@ def _is_empty_placeholder(record: dict[str, Any]) -> bool:
         return False
     meaningful_text = any(
         value_to_text(record.get(field)).strip()
-        for field in ('name', 'description', 'category', 'comment', 'status')
+        for field in ('customer', 'name', 'description', 'category', 'comment', 'status')
     )
     numeric_values = []
     for field in ('length', 'width', 'height', 'cubic', 'quantity', 'weight', 'pallet'):
@@ -67,7 +71,7 @@ def _is_empty_placeholder(record: dict[str, Any]) -> bool:
     return not meaningful_text and all(value == 0 for value in numeric_values)
 
 
-def _parse_product_records(records: list[dict[str, Any]]):
+def _parse_product_records(records: list[dict[str, Any]], *, with_customer=False):
     parsed: list[dict[str, Any]] = []
     errors: list[str] = []
     skipped_empty = 0
@@ -81,6 +85,9 @@ def _parse_product_records(records: list[dict[str, Any]]):
         row_errors: list[str] = []
         code_raw = value_to_text(record.get('code'))
         code_normalized = normalize_product_sku(record.get('code'))
+        customer_code = normalize_customer(record.get('customer')) if with_customer else ''
+        if with_customer and not valid_customer(customer_code):
+            row_errors.append(f'Row {row_number}: CUSTOMER is missing or invalid.')
         if not code_normalized:
             row_errors.append(f'Row {row_number}: product code is required.')
 
@@ -88,6 +95,7 @@ def _parse_product_records(records: list[dict[str, Any]]):
             'source_row_number': row_number,
             'product_code_raw': code_raw,
             'product_code_normalized': code_normalized,
+            'customer_code': customer_code,
             'name': value_to_text(record.get('name')),
             'description': value_to_text(record.get('description')),
             'category': value_to_text(record.get('category')),
@@ -120,11 +128,15 @@ def _parse_product_records(records: list[dict[str, Any]]):
         parsed.append(parsed_row)
         errors.extend(row_errors)
 
-    counts = Counter(row['product_code_normalized'] for row in parsed if row['product_code_normalized'])
-    duplicate_codes = sorted(code for code, count in counts.items() if count > 1)
-    for code in duplicate_codes:
-        duplicate_rows = [str(row['source_row_number']) for row in parsed if row['product_code_normalized'] == code]
-        errors.append(f'Duplicate product code {code} on rows {", ".join(duplicate_rows)}.')
+    counts = Counter(
+        (row['customer_code'], row['product_code_normalized']) for row in parsed
+        if row['product_code_normalized'] and (not with_customer or valid_customer(row['customer_code']))
+    )
+    duplicate_codes = sorted(product_identity(customer, sku) for (customer, sku), count in counts.items() if count > 1)
+    for identity in duplicate_codes:
+        duplicate_rows = [str(row['source_row_number']) for row in parsed
+                          if product_identity(row['customer_code'], row['product_code_normalized']) == identity]
+        errors.append(f'Duplicate CUSTOMER / product code {identity} on rows {", ".join(duplicate_rows)}.')
 
     return parsed, errors, duplicate_codes, skipped_empty
 
@@ -139,9 +151,9 @@ def _dimension_status(row: dict[str, Any]) -> str:
     return 'PARTIAL'
 
 
-def _product_map(client) -> dict[str, Product]:
+def _product_map(client) -> dict[tuple[str, str], Product]:
     return {
-        normalize_product_sku(product.sku): product
+        ('', normalize_product_sku(product.sku)): product
         for product in Product.objects.filter(client=client)
     }
 
@@ -170,7 +182,7 @@ def _comparison_details(row: ProductSourceRow | dict[str, Any], product: Product
 
 def _comparison_summary(parsed: list[dict[str, Any]], *, client) -> dict[str, Any]:
     products = _product_map(client)
-    source_skus = {row['product_code_normalized'] for row in parsed}
+    source_skus = {('', row['product_code_normalized']) for row in parsed}
     django_skus = set(products)
     unchanged = 0
     different = 0
@@ -178,7 +190,7 @@ def _comparison_summary(parsed: list[dict[str, Any]], *, client) -> dict[str, An
     for row in parsed:
         status, differences = _comparison_details(
             row,
-            products.get(row['product_code_normalized']),
+            products.get(('', row['product_code_normalized'])),
         )
         if status == 'UNCHANGED':
             unchanged += 1
@@ -192,8 +204,8 @@ def _comparison_summary(parsed: list[dict[str, Any]], *, client) -> dict[str, An
         'unchanged': unchanged,
         'different': different,
         'difference_counts': dict(sorted(difference_counts.items())),
-        'source_only': sorted(source_skus - django_skus),
-        'django_only': sorted(django_skus - source_skus),
+        'source_only': [product_identity(*key) for key in sorted(source_skus - django_skus)],
+        'django_only': [product_identity(*key) for key in sorted(django_skus - source_skus)],
     }
 
 
@@ -202,8 +214,12 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
     products = _product_map(external_file.client)
     stream = io.StringIO(newline='')
     writer = csv.writer(stream)
-    writer.writerow([
-        'record_status', 'source_row', 'source_columns', 'sku', 'comparison',
+    include_customer = bool((external_file.validation_summary or {}).get('source_customer_column'))
+    def write_row(values):
+        writer.writerow(values if include_customer else values[:3] + values[4:])
+
+    write_row([
+        'record_status', 'source_row', 'source_columns', 'customer', 'sku', 'comparison',
         'different_fields', 'validation_errors', 'name', 'dimension_status',
         'source_length_mm', 'source_width_mm', 'source_height_mm',
         'source_weight_kg', 'source_cubic_m3', 'source_pallet', 'source_status',
@@ -215,13 +231,13 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
         or PRODUCT_CSV_COLUMN_COUNT
     )
     for row in ProductSourceRow.objects.filter(external_file=external_file).iterator():
-        product = products.get(row.product_code_normalized)
+        product = products.get(('', row.product_code_normalized))
         comparison, differences = _comparison_details(
             row,
             product,
         )
-        writer.writerow([
-            'VALID', row.source_row_number, source_column_count,
+        write_row([
+            'VALID', row.source_row_number, source_column_count, external_file.client.code if include_customer else '',
             row.product_code_normalized, comparison, '|'.join(differences), '', row.name,
             _dimension_status({
                 'length_mm': row.length_mm,
@@ -240,10 +256,10 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
         external_file=external_file
     ).exclude(repair_status='APPROVED').iterator():
         raw = list(row.raw_values or [])
-        writer.writerow([
-            'REJECTED', row.source_row_number, row.column_count or '',
-            raw[0] if raw else '', '', '', '|'.join(row.validation_errors or []),
-            raw[1] if len(raw) > 1 else '', '', '', '', '', '', '', '', '',
+        write_row([
+            'REJECTED', row.source_row_number, row.column_count or '', external_file.client.code if include_customer else '',
+            raw[1] if include_customer and len(raw) > 1 else raw[0] if raw else '', '', '', '|'.join(row.validation_errors or []),
+            raw[2] if include_customer and len(raw) > 2 else raw[1] if len(raw) > 1 else '', '', '', '', '', '', '', '', '',
             '', '', '', '', '',
         ])
     return '\ufeff' + stream.getvalue()
@@ -252,6 +268,14 @@ def build_product_source_validation_report(external_file: ExternalDataFile) -> s
 def validate_product_source_file(external_file: ExternalDataFile, *, actor=None, request=None) -> dict:
     if external_file.file_type != 'PRODUCTS':
         raise SourceImportError('Only PRODUCTS files can be validated by this operation.')
+    if ExternalDataFile.objects.filter(
+        file_type='PRODUCTS', validation_summary__partition_source_id=external_file.pk,
+    ).exists():
+        raise SourceImportError('This source has client partitions. Upload a new snapshot instead of re-validating it.')
+    if any(batch.get('batch_id') and not batch.get('rolled_back_at') for batch in
+           (external_file.import_summary or {}).get('product_reconciliation_apply_batches', [])
+           if isinstance(batch, dict)):
+        raise SourceImportError('An applied Product source is immutable. Upload a new file instead.')
     if ProductSourceRejectedRow.objects.filter(
         external_file=external_file,
         repair_status__in={'PROPOSED', 'APPROVED'},
@@ -282,9 +306,12 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
         rejected_rows = list(source.rejected_rows)
         encoding = source.encoding
         source_format = source.source_format
+        with_customer = any(str(header).strip().lower() in {'customer', 'customer code', 'customer_code'} for header in headers)
+        if source_format == 'CSV' and source.source_column_count != (14 if with_customer else 13):
+            raise SourceImportError(f'A Product CSV with this header must contain {14 if with_customer else 13} columns.')
 
         rows_received = len(records) + len(rejected_rows)
-        parsed, errors, duplicate_codes, skipped_empty = _parse_product_records(records)
+        parsed, errors, duplicate_codes, skipped_empty = _parse_product_records(records, with_customer=with_customer)
         if source_format in {'XLS', 'XLSX'} and errors:
             raise SourceImportError('; '.join(errors[:25]))
 
@@ -293,7 +320,7 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
             valid_rows = []
             for row in parsed:
                 row_errors = list(row['validation_errors'])
-                if row['product_code_normalized'] in duplicate_set:
+                if product_identity(row['customer_code'], row['product_code_normalized']) in duplicate_set:
                     row_errors.append(
                         f'Row {row["source_row_number"]}: duplicate product code '
                         f'{row["product_code_normalized"]}.'
@@ -301,7 +328,7 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
                 if row_errors:
                     rejected_rows.append({
                         'source_row_number': row['source_row_number'],
-                        'column_count': PRODUCT_CSV_COLUMN_COUNT,
+                        'column_count': source.source_column_count,
                         'raw_values': list((row.get('raw_data') or {}).values()),
                         'validation_errors': row_errors,
                     })
@@ -311,6 +338,44 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
 
         if not parsed:
             raise SourceImportError('No valid product rows were found in the source file.')
+
+        # The file's CUSTOMER is a Client code. Each reconciliation source is
+        # owned by exactly one Client, preserving the existing decision and
+        # memory boundaries even when the uploaded workbook contains many.
+        partition_customer = (external_file.validation_summary or {}).get('partition_customer')
+        other_clients = []
+        if with_customer:
+            codes = {row['customer_code'] for row in parsed}
+            codes.update(normalize_customer((row.get('raw_values') or [''])[0])
+                         for row in rejected_rows if row.get('raw_values'))
+            existing = {client.code for client in Client.objects.filter(code__in=codes, active=True)}
+            unknown = codes - existing
+            if unknown:
+                raise SourceImportError('Unknown or inactive Client code(s) in CUSTOMER: ' + ', '.join(sorted(unknown)))
+            if actor is not None and getattr(actor, 'is_authenticated', False) and not actor.is_superuser:
+                try:
+                    authorised = set(allowed_clients_for(actor).values_list('code', flat=True))
+                except CalculatorAccessDenied as exc:
+                    raise SourceImportError('The user cannot validate Product sources.') from exc
+                if not codes.issubset(authorised):
+                    raise SourceImportError('CUSTOMER contains a Client the user is not authorised to access.')
+            selected = partition_customer or external_file.client.code
+            if selected not in codes:
+                raise SourceImportError(f'No Product rows belong to the selected Client {selected}.')
+            if selected != external_file.client.code:
+                raise SourceImportError('The partition Client does not match the source Client.')
+            other_clients = sorted(codes - {selected}) if not partition_customer else []
+            parsed = [row for row in parsed if row['customer_code'] == selected]
+            rejected_rows = [row for row in rejected_rows
+                             if normalize_customer((row.get('raw_values') or [''])[0]) == selected]
+            if not parsed:
+                raise SourceImportError(f'No valid Product rows belong to Client {selected}.')
+            rows_received = len(parsed) + len(rejected_rows)
+            # CUSTOMER stays in raw_data and validation provenance, never in Product.
+            for row in parsed:
+                row['customer_code'] = ''
+        elif partition_customer:
+            raise SourceImportError('The partitioned workbook no longer contains CUSTOMER.')
 
         comparison = _comparison_summary(parsed, client=external_file.client)
         source_skus = comparison['source_skus']
@@ -344,6 +409,12 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
             'worksheet': sheet_name,
             'header_row': header_row,
             'headers': headers,
+            'customer_column': False,
+            'source_customer_column': with_customer,
+            'resolved_client_code': external_file.client.code,
+            'partition_customer': partition_customer or '',
+            'partition_source_id': (external_file.validation_summary or {}).get('partition_source_id'),
+            'partition_client_codes': other_clients,
             'source_column_count': source.source_column_count,
             'rows_received': rows_received,
             'rows_valid': len(parsed),
@@ -401,7 +472,11 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
                 [
                     ProductSourceRejectedRow(
                         external_file=locked_file,
-                        proposed_data=build_product_repair_proposal(row.get('raw_values') or []),
+                        proposed_data=build_product_repair_proposal(
+                            (row.get('raw_values') or [])[1:] if with_customer
+                            else row.get('raw_values') or []
+                        ),
+                        customer_code='',
                         **row,
                     )
                     for row in rejected_rows
@@ -421,6 +496,15 @@ def validate_product_source_file(external_file: ExternalDataFile, *, actor=None,
                     'validated_at', 'status', 'error_message',
                 ]
             )
+            for code in other_clients:
+                child = ExternalDataFile.objects.create(
+                    client=Client.objects.get(code=code), file_type='PRODUCTS',
+                    source_method='COMMAND', original_filename=external_file.original_filename,
+                    uploaded_file=external_file.uploaded_file.name if external_file.uploaded_file else None,
+                    stored_path=external_file.stored_path, uploaded_by=actor if getattr(actor, 'is_authenticated', False) else None,
+                    validation_summary={'partition_customer': code, 'partition_source_id': external_file.pk},
+                )
+                validate_product_source_file(child, actor=actor, request=request)
 
         create_audit_event(
             event_type='PRODUCT_SOURCE_VALIDATED',

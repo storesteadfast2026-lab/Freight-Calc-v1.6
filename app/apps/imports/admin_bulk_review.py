@@ -6,6 +6,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied
 from django.template.response import TemplateResponse
 from django.urls import reverse
 
@@ -40,7 +41,7 @@ class BulkReviewWorkflow(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_source(self, object_id):
+    def get_source(self, request, object_id):
         raise NotImplementedError
 
     @abstractmethod
@@ -108,7 +109,7 @@ class BulkReviewWorkflow(ABC):
         if not self.has_permission(request):
             raise PermissionDenied
 
-        source = self.get_source(object_id)
+        source = self.get_source(request, object_id)
         items = list(self.get_items(source))
         bound_forms = {}
         page_errors = []
@@ -237,9 +238,16 @@ class ProductRejectedRowsBulkReview(BulkReviewWorkflow):
             )
         )
 
-    def get_source(self, object_id):
+    def get_source(self, request, object_id):
+        if request.user.is_superuser:
+            sources = ExternalDataFile.objects.all()
+        else:
+            try:
+                sources = ExternalDataFile.objects.filter(client__in=allowed_clients_for(request.user))
+            except CalculatorAccessDenied:
+                raise PermissionDenied
         return get_object_or_404(
-            ExternalDataFile,
+            sources,
             pk=object_id,
             file_type='PRODUCTS',
             status='VALIDATED',

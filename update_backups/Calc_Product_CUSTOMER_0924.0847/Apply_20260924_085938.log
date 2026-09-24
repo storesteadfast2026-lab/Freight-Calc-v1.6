@@ -1,0 +1,56 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260924085938
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Product_CUSTOMER_0924.0847\Calc_Product_CUSTOMER_0924.0847\Apply_Update.ps1
+Process ID: 7836
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+
+
+[+] copy 1/1
+ ✔ freight-calc-v16-db-1 Copied freight-calc-v16-db-1:/tmp/calc_customer_bb09562b716c420885df2e793dc28ce4.dump to C:\Docker-P... 0.1s
+
+[+] stop 1/1
+ ✔ Container freight-calc-v16-web-1 Stopped                                                                                      3.3s
+Container freight-calc-v16-web-run-3bb3c206e63d Creating
+Container freight-calc-v16-web-run-3bb3c206e63d Created
+Found 9 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+..1 legacy Products exported to /tmp/tmpsy2uyb34/review.csv. Review every approved row before Apply.
+1 approved CUSTOMER assignment(s) saved.
+.......
+----------------------------------------------------------------------
+Ran 9 tests in 0.213s
+
+OK
+Destroying test database for alias 'default'...
+Container freight-calc-v16-web-run-8f444e2fe318 Creating
+Container freight-calc-v16-web-run-8f444e2fe318 Created
+Operations to perform:
+  Apply all migrations: admin, audit, auth, authentication_gateway, carriers, clients, contenttypes, imports, locations, products, ra
+tes, saved_estimates, sessions
+Running migrations:
+  Applying imports.0015_productsourcerejectedrow_customer_code_and_more... OK
+  Applying products.0002_remove_product_products_pr_client__abaa70_idx_and_more... OK
+ ✔ Container freight-calc-v16-db-1  Running                                                                                      0.0s
+ ✔ Container freight-calc-v16-web-1 Started                                                                                      0.2s
+
+CUSTOMER update installed. Database migrated and web restarted.
+Backups: C:\Docker-Projects\Freight-Calc-v1.6\update_backups\Calc_Product_CUSTOMER_0924.0847
+**********************
+Windows PowerShell transcript end
+End time: 20260924085955
+**********************

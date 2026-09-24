@@ -1,0 +1,37 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<p><a href="{% url 'admin:clients_customer_changelist' %}">Back to Customers</a></p>
+{% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button class="button" type="submit" name="action" value="validate">Validate</button>
+</form>
+{% if preview %}
+<h2>Customer import preview</h2>
+<table>
+  <tr><th>File</th><td>{{ filename }}</td></tr>
+  <tr><th>Source rows</th><td>{{ preview.total_rows }}</td></tr>
+  <tr><th>New</th><td>{{ preview.new|length }}</td></tr>
+  <tr><th>Changed</th><td>{{ preview.changed|length }}</td></tr>
+  <tr><th>Unchanged</th><td>{{ preview.unchanged|length }}</td></tr>
+  <tr><th>Missing from file (retained)</th><td>{{ preview.missing|length }}</td></tr>
+  <tr><th>Invalid</th><td>{{ preview.errors|length }}</td></tr>
+  <tr><th>Duplicate codes</th><td>{{ preview.duplicates|length }}</td></tr>
+  <tr><th>Special records</th><td>{{ preview.special|length }}</td></tr>
+  <tr><th>Calculator Customer links proposed</th><td>{{ preview.links|length }}</td></tr>
+</table>
+{% if preview.missing %}<p>Missing from file (retained): {{ preview.missing|join:', ' }}</p>{% endif %}
+{% if preview.errors or preview.duplicates %}
+  <h3>Correct the workbook and validate again</h3>
+  <ul>{% for issue in preview.errors %}<li>{{ issue }}</li>{% endfor %}
+      {% for issue in preview.duplicates %}<li>{{ issue }}</li>{% endfor %}</ul>
+{% else %}
+  <p>Missing Customers will remain in the database. No Calculator Customers will be created.</p>
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="token" value="{{ token }}">
+    <button class="button default" type="submit" name="action" value="import">Import Customers</button>
+  </form>
+{% endif %}
+{% endif %}
+{% endblock %}

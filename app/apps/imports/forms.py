@@ -232,8 +232,10 @@ class SourceUploadForm(forms.Form):
         help_text='Optional note for this manual reference-data upload.',
     )
 
-    def __init__(self, *args, expected_filename='', allowed_extensions=('.xlsx',), **kwargs):
+    def __init__(self, *args, expected_filename='', allowed_extensions=('.xlsx',), allowed_clients=None, **kwargs):
         super().__init__(*args, **kwargs)
+        if allowed_clients is not None:
+            self.fields['client'].queryset = allowed_clients
         self.expected_filename = expected_filename
         self.allowed_extensions = tuple(extension.lower() for extension in allowed_extensions)
         if expected_filename:
