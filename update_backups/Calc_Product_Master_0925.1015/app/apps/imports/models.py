@@ -7,47 +7,6 @@ from django.utils import timezone
 from apps.clients.models import Client
 
 
-def product_master_upload_to(instance, filename):
-    """Store each global workbook snapshot independently of any Client."""
-    from uuid import uuid4
-    return f'product_master/{timezone.localdate():%Y/%m}/{uuid4().hex}_{Path(filename).name}'
-
-
-class ProductMaster(models.Model):
-    """Company-wide Product source snapshot; never owned by a Client."""
-
-    STATUS_CHOICES = [
-        ('UPLOADED', 'Uploaded'),
-        ('VALIDATED', 'Validated'),
-        ('VALIDATION_FAILED', 'Validation failed'),
-    ]
-    original_file = models.FileField(upload_to=product_master_upload_to)
-    original_filename = models.CharField(max_length=255)
-    sha256 = models.CharField(max_length=64, db_index=True)
-    file_size_bytes = models.PositiveBigIntegerField()
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    uploaded_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
-        related_name='product_masters_uploaded',
-    )
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='UPLOADED')
-    validated_at = models.DateTimeField(null=True, blank=True)
-    validated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='product_masters_validated',
-    )
-    validation_summary = models.JSONField(default=dict, blank=True)
-    error_message = models.TextField(blank=True)
-
-    class Meta:
-        ordering = ['-uploaded_at']
-        verbose_name = 'Product Master'
-        verbose_name_plural = 'Product Masters'
-
-    def __str__(self):
-        return f'{self.original_filename} ({self.pk})'
-
-
 def external_data_upload_to(instance, filename):
     """Build a stable, versioned path for uploaded/downloaded source files."""
     timestamp = timezone.localtime().strftime('%Y%m%d_%H%M%S')

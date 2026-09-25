@@ -1,0 +1,8 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<p>Upload the company-wide products.xls workbook. Each row's CUSTOMER code will be checked against Customers during validation. No Calculator Customer is selected.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  {{ form.as_p }}
+  <button class="button default" type="submit">Upload Product Master</button>
+</form>
+{% endblock %}

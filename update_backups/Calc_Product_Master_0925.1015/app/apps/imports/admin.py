@@ -1894,6 +1894,3 @@ class StockSourceRowAdmin(ReadOnlySourceRowAdmin):
     )
     list_select_related = ('external_file', 'external_file__client')
     ordering = ('external_file', 'source_row_number')
-
-# Register the global Product Master independently of ExternalDataFile.
-from . import admin_product_master  # noqa: E402,F401

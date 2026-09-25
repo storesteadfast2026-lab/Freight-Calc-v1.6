@@ -1,0 +1,23 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<p><strong>File:</strong> {{ master.original_filename }} &nbsp; <strong>Status:</strong> {{ master.get_status_display }}</p>
+<p><strong>Uploaded:</strong> {{ master.uploaded_at }} &nbsp; <strong>By:</strong> {{ master.uploaded_by|default:'—' }}</p>
+<p><strong>SHA-256:</strong> <code>{{ master.sha256 }}</code></p>
+{% if master.status != 'VALIDATED' %}
+<form method="post" action="{% url 'admin:imports_productmaster_validate' master.pk %}">{% csrf_token %}
+  <button class="button default" type="submit">Validate</button>
+</form>
+{% endif %}
+{% if master.error_message %}<p class="errornote">{{ master.error_message }}</p>{% endif %}
+{% if summary %}
+<h2>Validation overview</h2>
+<p>Rows read: {{ summary.rows_read }} · Reader rejected: {{ summary.rows_rejected_by_reader }} · Duplicate CUSTOMER/SKU pairs: {{ summary.duplicate_customer_sku_pairs }}</p>
+<ul>{% for status, count in summary.status_counts.items %}<li>{{ status }}: {{ count }}</li>{% endfor %}</ul>
+<h2>Rows by CUSTOMER</h2>
+<ul>{% for code, count in summary.customer_counts.items %}<li>{{ code }}: {{ count }}</li>{% endfor %}</ul>
+<h2>Preview (first {{ summary.preview_limit }} rows)</h2>
+<table><thead><tr><th>Row</th><th>CUSTOMER</th><th>SKU</th><th>Customer name</th><th>Calculator Customer</th><th>Resolution</th></tr></thead>
+<tbody>{% for row in summary.preview %}<tr><td>{{ row.row }}</td><td>{{ row.customer_code|default:'—' }}</td><td>{{ row.sku|default:'—' }}</td><td>{{ row.customer_name|default:'—' }}</td><td>{{ row.calculator_customer|default:'—' }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table>
+<p>Preview only. No Products or reconciliation were changed.</p>
+{% endif %}
+{% endblock %}
