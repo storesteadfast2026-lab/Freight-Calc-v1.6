@@ -10,7 +10,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.core import signing
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseNotAllowed, HttpResponseRedirect
+from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 
@@ -20,25 +20,10 @@ from .customer_import import (
     MAX_UPLOAD_BYTES, CustomerImportError, import_customers,
     master_state_digest, preview_customers,
 )
-from .calculator_customer_enable import CalculatorCustomerConflict, enable_calculator_customer
 from .models import Client, Customer, CustomerImport
 
 
 logger = logging.getLogger(__name__)
-
-
-class EnableCalculatorCustomerForm(forms.Form):
-    customer = forms.ModelChoiceField(
-        queryset=Customer.objects.none(), label='Customer', empty_label='Select a Customer',
-    )
-    active = forms.BooleanField(label='Active', required=False, initial=True)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields['customer'].queryset = (
-            Customer.objects.filter(is_special=False, linked_client__isnull=True)
-            .exclude(code='*').order_by('code')
-        )
 
 
 class CustomerUploadForm(forms.Form):
@@ -53,34 +38,8 @@ class CustomerUploadForm(forms.Form):
 
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
-    add_form_template = 'admin/clients/client/add_form.html'
     list_display = ('code', 'name', 'active', 'translogic_link', 'updated_at')
     search_fields = ('code', 'name')
-
-    def add_view(self, request, form_url='', extra_context=None):
-        """Require Customer selection on the existing Admin add URL, including direct POSTs."""
-        if not self.has_add_permission(request) or not is_django_administrator(request.user):
-            raise PermissionDenied('Calculator Customer creation requires an administrator.')
-        form = EnableCalculatorCustomerForm(request.POST or None)
-        if request.method == 'POST' and form.is_valid():
-            try:
-                customer = form.cleaned_data['customer']
-                client, created = enable_calculator_customer(
-                    customer.pk, active=form.cleaned_data['active'],
-                )
-                self.message_user(
-                    request,
-                    f'Calculator Customer {client.code} {"created" if created else "linked"} from Customer {customer.code}.',
-                    messages.SUCCESS,
-                )
-                return HttpResponseRedirect(reverse('admin:clients_client_change', args=[client.pk]))
-            except (CalculatorCustomerConflict, Customer.DoesNotExist) as exc:
-                form.add_error('customer', str(exc))
-        context = {
-            **self.admin_site.each_context(request), 'opts': self.model._meta,
-            'title': 'Add Calculator Customer', 'form': form,
-        }
-        return TemplateResponse(request, self.add_form_template, context)
 
     @admin.display(description='Translogic Customer')
     def translogic_link(self, obj):
@@ -108,26 +67,16 @@ class LinkedFilter(admin.SimpleListFilter):
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
     change_list_template = 'admin/clients/customer/change_list.html'
-    change_form_template = 'admin/clients/customer/change_form.html'
     list_display = ('code', 'name', 'group', 'group1', 'group2', 'wh_pick_code',
-                    'source_date', 'linked_client', 'calculator_customer_status', 'is_special')
+                    'source_date', 'linked_client', 'is_special')
     search_fields = ('code', 'name', 'group', 'group1', 'group2')
     list_filter = ('group', 'group1', 'group2', 'is_special', LinkedFilter)
     list_select_related = ('linked_client',)
     readonly_fields = ('code', 'name', 'group', 'group1', 'group2', 'their_code',
                        'wh_pick_code', 'acn', 'abn', 'gst_code', 'sett_days',
                        'paydays_type', 'source_date', 'source_user', 'is_special',
-                       'source_row_number', 'raw_data', 'created_at', 'updated_at',
-                       'calculator_customer_link', 'calculator_customer_status')
-    fields = readonly_fields
-
-    @admin.display(description='Calculator Customer')
-    def calculator_customer_link(self, obj):
-        return obj.linked_client.code if obj and obj.linked_client_id else '—'
-
-    @admin.display(description='Status')
-    def calculator_customer_status(self, obj):
-        return 'Linked' if obj and obj.linked_client_id else 'Not linked'
+                       'source_row_number', 'raw_data', 'created_at', 'updated_at')
+    fields = readonly_fields + ('linked_client',)
 
     def has_module_permission(self, request):
         return is_django_administrator(request.user)
@@ -136,8 +85,7 @@ class CustomerAdmin(admin.ModelAdmin):
         return is_django_administrator(request.user)
 
     def has_change_permission(self, request, obj=None):
-        # Customer master fields and links change through the import or enable service.
-        return False
+        return is_django_administrator(request.user)
 
     def has_add_permission(self, request):
         return False
@@ -145,30 +93,14 @@ class CustomerAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
-    def get_urls(self):
-        return [
-            path('import/', self.admin_site.admin_view(self.import_view),
-                 name='clients_customer_import'),
-            path('<int:customer_id>/enable/', self.admin_site.admin_view(self.enable_view),
-                 name='clients_customer_enable'),
-        ] + super().get_urls()
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'linked_client':
+            kwargs['queryset'] = Client.objects.filter(active=True)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    def enable_view(self, request, customer_id):
-        if not is_django_administrator(request.user):
-            raise PermissionDenied('Calculator Customer creation requires an administrator.')
-        if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
-        try:
-            client, created = enable_calculator_customer(customer_id, active=True)
-            self.message_user(
-                request,
-                f'Calculator Customer {client.code} {"created" if created else "linked"}.',
-                messages.SUCCESS,
-            )
-            return HttpResponseRedirect(reverse('admin:clients_customer_change', args=[customer_id]))
-        except (CalculatorCustomerConflict, Customer.DoesNotExist) as exc:
-            self.message_user(request, str(exc), messages.ERROR)
-            return HttpResponseRedirect(reverse('admin:clients_customer_change', args=[customer_id]))
+    def get_urls(self):
+        return [path('import/', self.admin_site.admin_view(self.import_view),
+                     name='clients_customer_import')] + super().get_urls()
 
     def import_view(self, request):
         if not is_django_administrator(request.user):

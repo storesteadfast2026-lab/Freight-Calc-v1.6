@@ -1,0 +1,6 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/clients/admin.py","True","16fcf67d8ec72b4bd53e6dadac4bcedf31df78c61757f6edf10b4d3d287f51bd","9691fc43b7d691d2d42165e8be5a98f111110a0f6ddee112aa382e383e3f7f84"
+"app/apps/clients/calculator_customer_enable.py","False","","a409b9e051cc2a615028d321b9d89662792f2e6a4dc32c131deacc4cf5c6332b"
+"app/apps/clients/tests/test_calculator_customer_enable.py","False","","1c6e2bda7199c0fad6854e706918531c0783c32899f455d7c4d962722bf19087"
+"app/templates/admin/clients/client/add_form.html","False","","435221e495bbac07f2c33ec3ab37f0152ff34ae160a60b41fcf012c2848e283b"
+"app/templates/admin/clients/customer/change_form.html","False","","6b95a407495007248f65b3b3d6a260e4c8d12545037b37898009602a59864b3a"

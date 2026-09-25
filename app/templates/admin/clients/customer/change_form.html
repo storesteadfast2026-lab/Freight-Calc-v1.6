@@ -1,0 +1,12 @@
+{% extends 'admin/change_form.html' %}
+{% block object-tools-items %}
+  {% if original and not original.is_special and original.code != '*' and not original.linked_client_id %}
+    <li>
+      <form method="post" action="{% url 'admin:clients_customer_enable' original.pk %}">
+        {% csrf_token %}
+        <button class="button" type="submit">Enable as Calculator Customer</button>
+      </form>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

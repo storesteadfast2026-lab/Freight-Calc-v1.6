@@ -1,0 +1,8 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<p>Select an existing Customer to enable it in the Calculator App. Code and Name are taken from that Customer.</p>
+<form method="post">{% csrf_token %}
+  {{ form.as_p }}
+  <button class="button default" type="submit">Enable as Calculator Customer</button>
+</form>
+{% endblock %}
