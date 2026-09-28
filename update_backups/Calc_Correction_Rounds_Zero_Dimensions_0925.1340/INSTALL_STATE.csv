@@ -1,0 +1,5 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/imports/admin_reconciliation.py","True","30b50b424bf0e1118779342c67bd957265b0ed405bbe17e517a684be7b01ab7b","062db76e80a9e127b51c456f9e05f27bc1543dfde708ea3cea8449db341c11e4"
+"app/apps/imports/services/product_correction_rounds.py","True","1de6a2b24b6e3d07a4878710e44d212e3c613ee57f90ec688bfd4cc210bbae5a","6bd6f56b51749213107c1c20bc9dbaed61b3a246cd0fa7a899da2df07aa75a7f"
+"app/templates/admin/imports/product_correction_round.html","True","69f6be242adeb71fa7d71e19bfeb064f3c7b97c2ff3a463e3af066177073644a","c0ec3befa9536a24bef050bcca05dd7e7e840a93e5fda97a349f199c54796c4e"
+"app/apps/imports/tests/test_product_reconciliation_workspace.py","True","96fb252a222286a148ebdfde7fec7e30ceb2cef2ff65841524e525d2176d772b","24b8f362f6d987fed0f03a76ec771e379397fb20678963f73f7c11880a887eba"

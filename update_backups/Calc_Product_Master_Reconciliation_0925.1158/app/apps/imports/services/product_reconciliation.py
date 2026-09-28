@@ -106,15 +106,12 @@ def _matched_row(source, product, duplicate_count):
     }
 
 
-def build_product_reconciliation(external_file, *, source_rows=None, pending_rejected=None):
+def build_product_reconciliation(external_file):
     """Compare reference staging against Product without changing either table."""
-    if source_rows is None:
-        source_rows = list(
-            ProductSourceRow.objects.filter(external_file=external_file)
-            .order_by('source_row_number')
-        )
-    else:
-        source_rows = sorted(source_rows, key=lambda row: row.source_row_number)
+    source_rows = list(
+        ProductSourceRow.objects.filter(external_file=external_file)
+        .order_by('source_row_number')
+    )
     products = {
         normalize_product_sku(product.sku): product
         for product in Product.objects.filter(client=external_file.client).order_by('sku')
@@ -169,10 +166,9 @@ def build_product_reconciliation(external_file, *, source_rows=None, pending_rej
         'source_only': counts['SOURCE_ONLY'],
         'operational_only': counts['OPERATIONAL_ONLY'],
         'duplicate_source': counts['DUPLICATE_SOURCE'],
-        'pending_rejected': (
-            external_file.product_rejected_rows.exclude(repair_status='APPROVED').count()
-            if pending_rejected is None else pending_rejected
-        ),
+        'pending_rejected': external_file.product_rejected_rows.exclude(
+            repair_status='APPROVED'
+        ).count(),
         'operational_tables_updated': False,
     }
     return rows, summary

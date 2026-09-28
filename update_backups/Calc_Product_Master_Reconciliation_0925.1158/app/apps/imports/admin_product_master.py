@@ -13,8 +13,6 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 
 from apps.authentication_gateway.services import is_django_administrator
-from apps.clients.models import Customer
-from apps.imports.admin_reconciliation import ProductMasterReadOnlyReconciliation
 from apps.imports.models import ProductMaster
 from apps.imports.services.audit import create_audit_event
 from apps.imports.services.product_master import validate_product_master
@@ -57,9 +55,6 @@ class ProductMasterAdmin(admin.ModelAdmin):
 
     def get_urls(self):
         return [
-            path('<int:master_id>/compare/<int:client_id>/',
-                 self.admin_site.admin_view(self.compare_view),
-                 name='imports_productmaster_compare'),
             path('<int:master_id>/validate/', self.admin_site.admin_view(self.validate_view),
                  name='imports_productmaster_validate'),
         ] + super().get_urls()
@@ -96,26 +91,11 @@ class ProductMasterAdmin(admin.ModelAdmin):
         if not self.has_view_permission(request):
             raise PermissionDenied('Product Master preview requires a Django administrator.')
         master = get_object_or_404(self.get_queryset(request), pk=object_id)
-        linked = (
-            Customer.objects.filter(
-                code__in=(master.validation_summary or {}).get('customer_counts', {}),
-                linked_client__isnull=False, is_special=False,
-            ).select_related('linked_client').order_by('code')
-            if master.status == 'VALIDATED' else []
-        )
         return TemplateResponse(request, 'admin/imports/productmaster/preview.html', {
             **self.admin_site.each_context(request), 'opts': self.model._meta,
             'title': 'Product Master', 'master': master,
             'summary': master.validation_summary or {},
-            'linked_customers': linked,
         })
-
-    def compare_view(self, request, master_id, client_id):
-        # ProductMasterReadOnlyReconciliation applies the existing Client scope
-        # before loading any global workbook rows, including for direct URLs.
-        return ProductMasterReadOnlyReconciliation(self.admin_site)(
-            request, master_id, client_id,
-        )
 
     def validate_view(self, request, master_id):
         if not self.has_view_permission(request):

@@ -10,14 +10,6 @@
 {% endif %}
 {% if master.error_message %}<p class="errornote">{{ master.error_message }}</p>{% endif %}
 {% if summary %}
-{% if linked_customers %}
-<h2>Read-only Product reconciliation by Calculator Customer</h2>
-<ul>{% for customer in linked_customers %}
-  <li>{{ customer.code }} — {{ customer.name }}:
-    <a href="{% url 'admin:imports_productmaster_compare' master.pk customer.linked_client_id %}">Compare {{ customer.linked_client.code }}</a>
-  </li>
-{% endfor %}</ul>
-{% endif %}
 <h2>Validation overview</h2>
 <p>Rows read: {{ summary.rows_read }} · Reader rejected: {{ summary.rows_rejected_by_reader }} · Duplicate CUSTOMER/SKU pairs: {{ summary.duplicate_customer_sku_pairs }}</p>
 <ul>{% for status, count in summary.status_counts.items %}<li>{{ status }}: {{ count }}</li>{% endfor %}</ul>

@@ -4,11 +4,10 @@ from abc import ABC, abstractmethod
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect
-from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied, is_django_administrator
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied
 from django.template.response import TemplateResponse
 from django.urls import reverse
 
@@ -18,16 +17,11 @@ from apps.imports.forms import (
 )
 from apps.imports.models import (
     ExternalDataFile,
-    ProductMaster,
     ProductCorrectionRound,
     ProductReconciliationDecision,
     ProductReconciliationRule,
 )
 from apps.imports.services.product_reconciliation import build_product_reconciliation
-from apps.imports.services.product_master import reconciliation_rows_for_customer
-from apps.imports.services.xlsx_reader import SourceImportError
-from apps.clients.models import Client, Customer
-from django.http import Http404, HttpResponseNotAllowed
 from apps.imports.services.product_reconciliation_workspace import (
     ProductReconciliationWorkspaceError,
     apply_rule_as_draft,
@@ -38,7 +32,6 @@ from apps.imports.services.product_reconciliation_workspace import (
     rows_for_group,
     save_product_reconciliation_decisions,
     save_reconciliation_rule,
-    RECONCILABLE_FIELDS,
 )
 from apps.imports.services.product_reconciliation_apply import (
     ProductReconciliationApplyBlocked,
@@ -59,10 +52,6 @@ from apps.imports.services.product_reconciliation_memory import (
 from apps.imports.services.product_correction_rounds import (
     CorrectionRoundError, start_correction_round, save_correction_decision,
     correction_preview, apply_correction_round, rollback_correction_round,
-    bulk_dimension_candidates, is_zero_source_dimensions_candidate,
-    save_bulk_operational_dimensions,
-    bulk_field_candidates, save_bulk_field_decisions,
-    save_inline_correction_decisions, corrected_skus_for_source,
 )
 
 
@@ -85,77 +74,6 @@ GROUP_LABELS = {
     'DUPLICATE_SOURCE': 'Duplicate source SKU',
     'SAME': 'Same',
 }
-
-
-CORRECTION_GROUPS = {
-    'ALL': 'All differences', 'SOURCE_DIMENSIONS_ZERO': 'Source dimensions zero',
-    'DIMENSIONS': 'Dimensions', 'WEIGHT': 'Weight', 'CUBIC': 'Cubic',
-    'MULTIPLE': 'Multiple fields',
-}
-CORRECTION_STATUSES = {
-    'OPEN': 'Open (unreviewed and draft)', 'UNREVIEWED': 'Unreviewed',
-    'DRAFT': 'Draft', 'CORRECTED': 'Already corrected', 'ALL': 'All',
-}
-
-
-def filter_correction_rows(rows, *, group='ALL', status='OPEN', query='',
-                           draft_skus=(), corrected_skus=()):
-    """The same row filter serves display and server-side select-all."""
-    group = group if group in CORRECTION_GROUPS else 'ALL'
-    status = status if status in CORRECTION_STATUSES else 'OPEN'
-    draft_skus, corrected_skus = set(draft_skus), set(corrected_skus)
-    query = str(query or '').strip().lower()
-    result = []
-    for row in rows:
-        if row['status'] != 'DIFFERENT' or not row.get('source') or not row.get('product'):
-            continue
-        changed = set(row['changed_fields'])
-        if group == 'SOURCE_DIMENSIONS_ZERO' and not is_zero_source_dimensions_candidate(row):
-            continue
-        if group in {'DIMENSIONS', 'WEIGHT', 'CUBIC'} and group.lower() not in changed:
-            continue
-        if group == 'MULTIPLE' and len(changed) < 2:
-            continue
-        sku = row['sku']
-        if status == 'OPEN' and sku in corrected_skus:
-            continue
-        if status == 'UNREVIEWED' and (sku in corrected_skus or sku in draft_skus):
-            continue
-        if status == 'DRAFT' and sku not in draft_skus:
-            continue
-        if status == 'CORRECTED' and sku not in corrected_skus:
-            continue
-        if query and query not in sku.lower() and query not in str(row['source_values'].get('name') or '').lower() and query not in str(row['operational_values'].get('name') or '').lower():
-            continue
-        result.append(row)
-    return result
-
-
-def correction_table_fields(row, form):
-    """Present the existing six per-field authorities beside both compared values."""
-    spec = {
-        'name': ('Name', ('name',)),
-        'description': ('Description', ('description',)),
-        'dimensions': ('Dimensions (m)', ('length_m', 'width_m', 'height_m')),
-        'weight': ('Weight (kg)', ('weight_kg',)),
-        'cubic': ('Cubic (m³)', ('cubic_m3',)),
-        'freight_type': ('Case/Pallet', ('freight_type',)),
-    }
-    visible, hidden = [], []
-    for field in RECONCILABLE_FIELDS:
-        label, value_keys = spec[field]
-        authority = form[f'{field}_authority']
-        customs = [form[f'custom_{key}'] for key in value_keys]
-        if field in row['changed_fields']:
-            visible.append({
-                'key': field, 'label': label,
-                'source': ' × '.join(str(row['source_values'].get(key, '')) for key in value_keys),
-                'current': ' × '.join(str(row['operational_values'].get(key, '')) for key in value_keys),
-                'authority': authority, 'customs': customs,
-            })
-        else:
-            hidden.extend([authority, *customs])
-    return visible, hidden
 
 
 class ReadOnlyReconciliationWorkflow(ABC):
@@ -233,55 +151,6 @@ class ReadOnlyReconciliationWorkflow(ABC):
         return TemplateResponse(request, self.template_name, context)
 
 
-class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
-    """Use the existing comparison view for one authorised Client, without staging."""
-
-    page_title = 'Product Master reconciliation comparison'
-    page_description = 'Read-only comparison; decisions, memory and Products remain unchanged.'
-
-    def __call__(self, request, object_id, client_id):
-        if not self.has_permission(request):
-            raise PermissionDenied
-        if request.method != 'GET':
-            return HttpResponseNotAllowed(['GET'])
-        self.client_id = client_id
-        response = super().__call__(request, object_id)
-        response.context_data['back_url'] = reverse(
-            'admin:imports_productmaster_change', args=[object_id],
-        ) if is_django_administrator(request.user) else reverse('admin:index')
-        response.context_data['back_label'] = 'Product Masters'
-        return response
-
-    def get_source(self, request, object_id):
-        if request.user.is_superuser:
-            clients = Client.objects.all()
-        else:
-            try:
-                clients = allowed_clients_for(request.user)
-            except CalculatorAccessDenied as exc:
-                raise PermissionDenied from exc
-        client = get_object_or_404(clients, pk=self.client_id)
-        customer = get_object_or_404(Customer, linked_client=client, is_special=False)
-        master = get_object_or_404(ProductMaster, pk=object_id, status='VALIDATED')
-        try:
-            rows = reconciliation_rows_for_customer(master, customer)
-        except SourceImportError as exc:
-            # Do not disclose data or validation details from other Customers.
-            raise Http404('This Product Master cannot be compared for this Customer.') from exc
-        source = ExternalDataFile(
-            client=client, file_type='PRODUCTS', status='VALIDATED',
-            original_filename=master.original_filename,
-        )
-        source.master_rows = rows
-        return source
-
-    def build_reconciliation(self, source):
-        return build_workspace(
-            source, source_rows=source.master_rows, pending_rejected=0,
-            include_decisions=False,
-        )
-
-
 class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
     template_name = 'admin/imports/product_reconciliation_workspace.html'
     page_title = 'Product reconciliation workspace'
@@ -315,14 +184,12 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
     def _correction_view(self, request, source):
         if not self.has_manage_permission(request):
             raise PermissionDenied
-        posted_actions = request.POST.getlist('correction_action')
-        action = posted_actions[-1] if posted_actions else ''
+        action = request.POST.get('correction_action', '')
         selected_id = request.POST.get('round_id') or request.GET.get('round')
         round_obj = get_object_or_404(
             ProductCorrectionRound, pk=selected_id, external_file=source
         ) if selected_id else None
         base_url = f'{request.path}?mode=correction'
-        bulk_preview = None
         try:
             if request.method == 'POST':
                 if action == 'start':
@@ -330,128 +197,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                     return redirect(f'{base_url}&round={round_obj.pk}')
                 if not round_obj:
                     raise CorrectionRoundError('Select a correction round.')
-                if action == 'preview_bulk_dimensions':
-                    if request.POST.get('select_all_eligible') == 'yes':
-                        all_rows, _ = build_workspace(source)
-                        prior_skus = set(
-                            ProductCorrectionRound.objects.filter(
-                                external_file=source, status='APPLIED',
-                            ).values_list('decisions__sku', flat=True)
-                        ) if request.POST.get('show_all') != 'yes' else set()
-                        search = str(request.POST.get('q') or '').strip().lower()
-                        skus = [
-                            row['sku'] for row in all_rows
-                            if is_zero_source_dimensions_candidate(row)
-                            and row['sku'] not in prior_skus
-                            and (not search or search in row['sku'].lower()
-                                 or search in str(row['source_values'].get('name') or '').lower())
-                        ]
-                    else:
-                        skus = request.POST.getlist('selected_skus')
-                    bulk_preview = bulk_dimension_candidates(round_obj, skus)
-                    bulk_preview['token'] = signing.dumps({
-                        'round': round_obj.pk, 'source': source.pk,
-                        'selected': list(dict.fromkeys(str(sku).strip() for sku in skus if str(sku).strip())),
-                        'eligible': bulk_preview['eligible'],
-                    }, salt='product-correction-zero-dimensions', compress=True)
-                    bulk_preview['notes'] = str(request.POST.get('notes') or '').strip()
-                if action == 'save_bulk_dimensions':
-                    try:
-                        selection = signing.loads(
-                            request.POST.get('preview_token', ''),
-                            salt='product-correction-zero-dimensions', max_age=1800,
-                        )
-                    except signing.BadSignature as exc:
-                        raise CorrectionRoundError('Preview expired or changed. Review the SKUs again.') from exc
-                    if selection.get('round') != round_obj.pk or selection.get('source') != source.pk:
-                        raise CorrectionRoundError('Preview belongs to a different correction round.')
-                    result = save_bulk_operational_dimensions(
-                        round_obj.pk, skus=selection['selected'],
-                        expected_eligible=selection['eligible'],
-                        notes=request.POST.get('notes'), actor=request.user, request=request,
-                    )
-                    messages.success(request, f"{len(result['eligible'])} dimension decision(s) saved in the draft; Products unchanged. {len(result['excluded'])} excluded.")
-                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
-                if action == 'preview_bulk_field':
-                    selected = request.POST.getlist('selected_skus')
-                    if request.POST.get('select_all_filtered') == 'yes':
-                        all_rows, _ = build_workspace(source)
-                        draft_skus = set(round_obj.decisions.values_list('sku', flat=True))
-                        corrected_skus = corrected_skus_for_source(source)
-                        filtered = filter_correction_rows(
-                            all_rows, group=request.POST.get('group'),
-                            status=request.POST.get('status'), query=request.POST.get('q'),
-                            draft_skus=draft_skus, corrected_skus=corrected_skus,
-                        )
-                        selected = [row['sku'] for row in filtered]
-                    field = request.POST.get('bulk_field', '')
-                    authority = request.POST.get('bulk_authority', '')
-                    bulk_field_preview = bulk_field_candidates(
-                        round_obj, selected, field=field, authority=authority,
-                    )
-                    bulk_field_preview.update({
-                        'field': field, 'authority': authority,
-                        'notes': str(request.POST.get('bulk_reason') or '').strip(),
-                    })
-                    bulk_field_preview['token'] = signing.dumps({
-                        'round': round_obj.pk, 'source': source.pk,
-                        'selected': list(dict.fromkeys(selected)),
-                        'eligible': bulk_field_preview['eligible'],
-                        'field': field, 'authority': authority,
-                    }, salt='product-correction-bulk-field', compress=True)
-                if action == 'save_bulk_field':
-                    try:
-                        selection = signing.loads(
-                            request.POST.get('preview_token', ''),
-                            salt='product-correction-bulk-field', max_age=1800,
-                        )
-                    except signing.BadSignature as exc:
-                        raise CorrectionRoundError('Bulk Preview expired or changed. Review the SKUs again.') from exc
-                    if selection.get('round') != round_obj.pk or selection.get('source') != source.pk:
-                        raise CorrectionRoundError('Bulk Preview belongs to another correction round.')
-                    result = save_bulk_field_decisions(
-                        round_obj.pk, skus=selection['selected'],
-                        expected_eligible=selection['eligible'],
-                        field=selection['field'], authority=selection['authority'],
-                        notes=request.POST.get('bulk_reason'), actor=request.user,
-                        request=request,
-                    )
-                    messages.success(request, f"{len(result['eligible'])} field decision(s) saved in draft; Products unchanged. {len(result['excluded'])} excluded.")
-                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
-                if action in {'save_inline', 'save_selected_inline'}:
-                    skus = (
-                        request.POST.getlist('selected_skus') if action == 'save_selected_inline'
-                        else [str(request.POST.get('inline_sku') or '').strip()]
-                    )
-                    if not skus or not all(skus) or len(skus) != len(set(skus)):
-                        raise CorrectionRoundError('Select distinct Product rows to save.')
-                    row_map = {row['sku']: row for row in build_workspace(source)[0]}
-                    entries = []
-                    for sku in skus:
-                        row = row_map.get(sku)
-                        if not row or not row.get('product') or row['status'] != 'DIFFERENT':
-                            raise CorrectionRoundError(f'{sku}: no matched Product with a remaining difference.')
-                        form = ProductReconciliationIndividualForm(
-                            request.POST, prefix=f"r{row['product'].pk}",
-                        )
-                        if not form.is_valid():
-                            raise CorrectionRoundError(f"{sku}: " + '; '.join(
-                                str(error) for errors in form.errors.values() for error in errors
-                            ))
-                        if form.cleaned_data['sku'] != sku:
-                            raise CorrectionRoundError(f'{sku}: selected SKU and form do not match.')
-                        entries.append({
-                            'sku': sku, 'field_decisions': form.field_decisions(),
-                            'custom_values': form.custom_values(),
-                            'notes': form.cleaned_data['notes'] or request.POST.get('bulk_reason'),
-                            'confirm_source_dimensions': sku in request.POST.getlist('confirmed_source_skus'),
-                            'allow_reopen': sku in request.POST.getlist('confirmed_reopen_skus'),
-                        })
-                    count = save_inline_correction_decisions(
-                        round_obj.pk, entries=entries, actor=request.user, request=request,
-                    )
-                    messages.success(request, f'{count} correction decision(s) saved in draft. Products unchanged.')
-                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
                 if action == 'save':
                     form = ProductReconciliationIndividualForm(request.POST)
                     if not form.is_valid():
@@ -485,8 +230,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                     round_obj.save(update_fields=['status'])
                     messages.success(request, 'Draft round discarded. Operational Products unchanged.')
                     return redirect(base_url)
-                if action not in {'preview_bulk_dimensions', 'preview_bulk_field'}:
-                    raise PermissionDenied('Unsupported correction action.')
+                raise PermissionDenied('Unsupported correction action.')
         except CorrectionRoundError as exc:
             messages.error(request, str(exc))
             return redirect(f'{base_url}&round={round_obj.pk}' if round_obj else base_url)
@@ -495,54 +239,19 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
         if not round_obj:
             round_obj = history.filter(status='DRAFT').first() or history.first()
         rows, summary = build_workspace(source)
-        reviewed_skus = corrected_skus_for_source(source)
-        draft_by_sku = {
-            decision.sku: decision for decision in (
-                round_obj.decisions.all() if round_obj and round_obj.status == 'DRAFT' else []
-            )
-        }
-        physical_count = sum(
-            row['status'] == 'DIFFERENT' and
-            bool(set(row['changed_fields']).intersection({'dimensions', 'weight', 'cubic'}))
-            for row in rows
-        )
-        query = str(request.GET.get('q') or request.POST.get('q') or '').strip().lower()
-        selected_group = str(request.GET.get('group') or request.POST.get('group') or 'ALL')
-        if selected_group not in CORRECTION_GROUPS:
-            selected_group = 'ALL'
-        selected_status = str(request.GET.get('status') or request.POST.get('status') or (
-            'ALL' if request.GET.get('show') == 'all' else 'OPEN'
-        ))
-        if selected_status not in CORRECTION_STATUSES:
-            selected_status = 'OPEN'
-        relevant = filter_correction_rows(
-            rows, group=selected_group, status=selected_status, query=query,
-            draft_skus=draft_by_sku, corrected_skus=reviewed_skus,
-        )
-        zero_dimensions_count = sum(
-            is_zero_source_dimensions_candidate(row) for row in rows
-        )
+        reviewed_skus = set()
+        for applied_round in history.filter(status='APPLIED').prefetch_related('decisions'):
+            reviewed_skus.update(decision.sku for decision in applied_round.decisions.all())
+        relevant = [row for row in rows if row['status'] == 'DIFFERENT'
+                    and set(row['changed_fields']).intersection({'dimensions', 'weight', 'cubic'})]
+        physical_count = len(relevant)
+        if request.GET.get('show') != 'all':
+            relevant = [row for row in relevant if row['sku'] not in reviewed_skus]
+        query = str(request.GET.get('q') or '').strip().lower()
+        if query:
+            relevant = [row for row in relevant if query in row['sku'].lower()
+                        or query in str(row['source_values'].get('name') or '').lower()]
         page = Paginator(relevant, self.page_size).get_page(request.GET.get('page'))
-        table_rows = []
-        if round_obj and round_obj.status == 'DRAFT' and request.GET.get('preview') != '1':
-            for row in page:
-                sku, previous = row['sku'], draft_by_sku.get(row['sku'])
-                initial = {'sku': sku, 'notes': previous.notes if previous else ''}
-                for field in RECONCILABLE_FIELDS:
-                    initial[f'{field}_authority'] = (
-                        previous.field_decisions.get(field, 'NO_CHANGE') if previous else 'NO_CHANGE'
-                    )
-                if previous:
-                    initial.update({f'custom_{key}': value for key, value in previous.custom_values.items()})
-                form = ProductReconciliationIndividualForm(
-                    initial=initial, prefix=f"r{row['product'].pk}",
-                )
-                fields, hidden_fields = correction_table_fields(row, form)
-                table_rows.append({
-                    'row': row, 'form': form, 'fields': fields, 'hidden_fields': hidden_fields,
-                    'decision': previous, 'corrected': sku in reviewed_skus,
-                    'multiple': len(fields) > 1,
-                })
         selected_sku = str(request.GET.get('edit') or '').strip()
         edit_row = next((row for row in relevant if row['sku'] == selected_sku), None)
         form = None
@@ -588,14 +297,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
             'summary': summary, 'query': query,
             'physical_count': physical_count, 'reviewed_count': len(reviewed_skus),
             'decision_history': decision_history,
-            'selected_group': selected_group,
-            'zero_dimensions_count': zero_dimensions_count,
-            'bulk_preview': bulk_preview,
-            'bulk_field_preview': bulk_field_preview if request.method == 'POST' and action == 'preview_bulk_field' else None,
-            'table_rows': table_rows, 'selected_status': selected_status,
-            'correction_groups': CORRECTION_GROUPS.items(),
-            'correction_statuses': CORRECTION_STATUSES.items(),
-            'result_count': len(relevant),
         })
 
     @staticmethod

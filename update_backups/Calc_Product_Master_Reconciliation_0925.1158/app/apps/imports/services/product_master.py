@@ -7,54 +7,16 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.clients.models import Customer
-from apps.imports.models import ProductMaster, ProductSourceRow
+from apps.imports.models import ProductMaster
 from apps.imports.services.product_file_adapters import read_product_file
 from apps.imports.services.product_source import (
     PRODUCT_ALIASES, PRODUCT_CSV_COLUMN_COUNT, PRODUCT_REQUIRED_FIELDS,
-    _parse_product_records,
 )
 from apps.imports.services.xlsx_reader import SourceImportError, normalize_product_sku
 from apps.products.identity import normalize_customer, valid_customer
 
 
 PREVIEW_LIMIT = 100
-
-
-def reconciliation_rows_for_customer(master, customer):
-    """Return unsaved source rows for one currently linked Customer.
-
-    Preserve the existing Calculator Customer access/authorisation rules.
-    Product Master rows must only be exposed to Product Reconciliation within
-    the authorised Calculator Customer scope; the global Product Master must
-    not bypass existing customer data isolation.
-    """
-    if master.status != 'VALIDATED' or not customer.linked_client_id:
-        raise SourceImportError('A validated Product Master and linked Customer are required.')
-    master.original_file.open('rb')
-    try:
-        content = master.original_file.read()
-    finally:
-        master.original_file.close()
-    if sha256(content).hexdigest() != master.sha256:
-        raise SourceImportError('The stored Product Master does not match its upload checksum.')
-    source = read_product_file(
-        content, master.original_filename, aliases=PRODUCT_ALIASES,
-        required_fields=PRODUCT_REQUIRED_FIELDS,
-        expected_csv_column_count=PRODUCT_CSV_COLUMN_COUNT,
-    )
-    if not any(str(header).strip().lower() in {'customer', 'customer code', 'customer_code'}
-               for header in source.headers):
-        raise SourceImportError('Product Master requires a CUSTOMER column.')
-    selected = [record for record in source.records
-                if normalize_customer(record.get('customer')) == customer.code]
-    if not selected:
-        raise SourceImportError('No Product Master rows belong to this Customer.')
-    parsed, _errors, _duplicates, _empty = _parse_product_records(selected, with_customer=True)
-    # An invalid selected row cannot enter reconciliation; never repair or
-    # silently convert it into a different Customer's staging row.
-    if any(row['validation_errors'] for row in parsed):
-        raise SourceImportError('Selected Customer has invalid Product Master rows.')
-    return [ProductSourceRow(**row) for row in parsed]
 
 
 def validate_product_master(master_id, *, actor=None):

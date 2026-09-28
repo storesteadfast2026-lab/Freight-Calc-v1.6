@@ -16,7 +16,6 @@ from apps.imports.models import (
     ProductReconciliationRule,
     ProductSourceRow,
     ProductCorrectionRound,
-    ProductCorrectionDecision,
 )
 from apps.imports.management.commands.import_sth_excel import Command as ImportSthCommand
 from apps.imports.services.product_reconciliation_workspace import (
@@ -37,7 +36,6 @@ from apps.imports.services.product_reconciliation_apply import (
 from apps.imports.services.product_correction_rounds import (
     start_correction_round, save_correction_decision, correction_preview,
     apply_correction_round, rollback_correction_round, CorrectionRoundError,
-    bulk_dimension_candidates, save_bulk_operational_dimensions,
 )
 from apps.imports.services.product_reconciliation_memory import (
     ProductReconciliationMemoryError,
@@ -789,127 +787,6 @@ class ProductReconciliationWorkspaceTests(TestCase):
         self.assertFalse(correction_preview(round_obj)['can_apply'])
         with self.assertRaises(CorrectionRoundError):
             apply_correction_round(round_obj.pk, actor=self.user)
-
-    def test_bulk_zero_dimensions_preserves_other_decisions_and_waits_for_apply(self):
-        create_recommended_product_drafts(self.external_file, actor=self.user)
-        apply_product_reconciliation(self.external_file.pk, actor=self.user)
-        round_obj = start_correction_round(self.external_file.pk, actor=self.user)
-        original = list(Product.objects.filter(pk=self.product.pk).values())[0]
-        existing = save_correction_decision(
-            round_obj.pk, sku='20772',
-            field_decisions={'dimensions': 'NO_CHANGE', 'weight': 'SOURCE',
-                             'cubic': 'NO_CHANGE', 'name': 'NO_CHANGE',
-                             'description': 'NO_CHANGE', 'freight_type': 'NO_CHANGE'},
-            notes='Retain my verified weight decision.', actor=self.user,
-        )
-        result = save_bulk_operational_dimensions(
-            round_obj.pk, skus=['20772'], expected_eligible=['20772'],
-            notes='Keep verified Calculator dimensions.', actor=self.user,
-        )
-        existing.refresh_from_db()
-        self.assertEqual(result['eligible'], ['20772'])
-        self.assertEqual(round_obj.decisions.count(), 1)
-        self.assertEqual(existing.field_decisions['dimensions'], 'OPERATIONAL')
-        self.assertEqual(existing.field_decisions['weight'], 'SOURCE')
-        self.assertEqual(existing.notes, 'Retain my verified weight decision.')
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], original)
-        self.assertTrue(correction_preview(round_obj)['can_apply'])
-        apply_correction_round(round_obj.pk, actor=self.user)
-        self.product.refresh_from_db()
-        self.assertEqual(self.product.weight_kg, Decimal('45.2'))
-        self.assertEqual(self.product.length_m, Decimal('1.2'))
-        self.assertEqual(self.product.cubic_m3, original['cubic_m3'])
-        rollback_correction_round(round_obj.pk, actor=self.user)
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], original)
-
-    def test_bulk_zero_dimensions_noop_records_approval_without_writing_product(self):
-        create_recommended_product_drafts(self.external_file, actor=self.user)
-        apply_product_reconciliation(self.external_file.pk, actor=self.user)
-        round_obj = start_correction_round(self.external_file.pk, actor=self.user)
-        before = list(Product.objects.filter(pk=self.product.pk).values())[0]
-        result = save_bulk_operational_dimensions(
-            round_obj.pk, skus=['20772'], expected_eligible=['20772'],
-            notes='Measured physical dimensions verified.', actor=self.user,
-        )
-        self.assertEqual(result['excluded'], [])
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-        self.assertTrue(correction_preview(round_obj)['can_apply'])
-        apply_correction_round(round_obj.pk, actor=self.user)
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-        self.assertTrue(ProductCorrectionDecision.objects.filter(round=round_obj, sku='20772').exists())
-        self.assertTrue(AuditEvent.objects.filter(event_type='PRODUCT_CORRECTION_ROUND_APPLIED').exists())
-        rollback_correction_round(round_obj.pk, actor=self.user)
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-
-    def test_bulk_zero_dimensions_excludes_invalid_and_foreign_skus(self):
-        create_recommended_product_drafts(self.external_file, actor=self.user)
-        apply_product_reconciliation(self.external_file.pk, actor=self.user)
-        round_obj = start_correction_round(self.external_file.pk, actor=self.user)
-        invalid = Product.objects.create(client=self.client_obj, sku='INVALID',
-            length_m=Decimal('1'), width_m=Decimal('0'), height_m=Decimal('1'))
-        ProductSourceRow.objects.create(external_file=self.external_file,
-            source_row_number=6793, product_code_raw='INVALID',
-            product_code_normalized='INVALID', name='Different name',
-            length_mm=0, width_mm=0, height_mm=0)
-        other_client = Client.objects.create(code='PON', name='PON', active=True)
-        Product.objects.create(client=other_client, sku='PON-ONLY',
-            length_m=Decimal('1'), width_m=Decimal('1'), height_m=Decimal('1'))
-        result = bulk_dimension_candidates(round_obj, ['20772', 'INVALID', 'PON-ONLY'])
-        self.assertEqual(result['eligible'], ['20772'])
-        self.assertEqual([item['sku'] for item in result['excluded']], ['INVALID', 'PON-ONLY'])
-        with self.assertRaises(CorrectionRoundError):
-            save_bulk_operational_dimensions(round_obj.pk,
-                skus=['20772', 'INVALID'], expected_eligible=['20772', 'INVALID'],
-                notes='Misleading selection.', actor=self.user)
-        self.assertEqual(round_obj.decisions.count(), 0)
-        self.assertTrue(Product.objects.filter(pk=invalid.pk).exists())
-
-    def test_bulk_zero_dimensions_ui_requires_preview_and_shows_exclusions(self):
-        create_recommended_product_drafts(self.external_file, actor=self.user)
-        apply_product_reconciliation(self.external_file.pk, actor=self.user)
-        round_obj = start_correction_round(self.external_file.pk, actor=self.user)
-        self.client.force_login(self.user)
-        url = reverse('admin:imports_externaldatafile_product_reconciliation',
-            args=[self.external_file.pk])
-        response = self.client.get(f'{url}?mode=correction&round={round_obj.pk}&group=SOURCE_DIMENSIONS_ZERO')
-        self.assertContains(response, 'Select all eligible across all pages')
-        response = self.client.post(f'{url}?mode=correction', {
-            'correction_action': 'preview_bulk_dimensions', 'round_id': round_obj.pk,
-            'group': 'SOURCE_DIMENSIONS_ZERO', 'selected_skus': ['20772', 'PON-ONLY'],
-            'notes': 'Measured.',
-        })
-        self.assertContains(response, '1 included')
-        self.assertContains(response, '1 excluded')
-        self.assertEqual(round_obj.decisions.count(), 0)
-        token = response.context['bulk_preview']['token']
-        response = self.client.post(f'{url}?mode=correction', {
-            'correction_action': 'save_bulk_dimensions', 'round_id': round_obj.pk,
-            'preview_token': token, 'notes': 'Measured.',
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(round_obj.decisions.count(), 1)
-
-    def test_bulk_select_all_previews_ineligible_rows_without_saving_them(self):
-        create_recommended_product_drafts(self.external_file, actor=self.user)
-        apply_product_reconciliation(self.external_file.pk, actor=self.user)
-        round_obj = start_correction_round(self.external_file.pk, actor=self.user)
-        Product.objects.create(client=self.client_obj, sku='PARTIAL',
-            length_m=Decimal('1'), width_m=Decimal('0'), height_m=Decimal('1'))
-        ProductSourceRow.objects.create(external_file=self.external_file,
-            source_row_number=6794, product_code_raw='PARTIAL',
-            product_code_normalized='PARTIAL', name='Partial dimensions',
-            length_mm=0, width_mm=0, height_mm=0)
-        self.client.force_login(self.user)
-        url = reverse('admin:imports_externaldatafile_product_reconciliation',
-            args=[self.external_file.pk])
-        response = self.client.post(f'{url}?mode=correction', {
-            'correction_action': 'preview_bulk_dimensions', 'round_id': round_obj.pk,
-            'group': 'SOURCE_DIMENSIONS_ZERO', 'select_all_eligible': 'yes',
-        })
-        self.assertContains(response, '1 included')
-        self.assertContains(response, '1 excluded')
-        self.assertContains(response, 'PARTIAL')
-        self.assertFalse(round_obj.decisions.exists())
 
     def test_correction_round_is_accessible_from_applied_workspace(self):
         create_recommended_product_drafts(self.external_file, actor=self.user)

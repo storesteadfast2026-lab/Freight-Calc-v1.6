@@ -154,13 +154,13 @@ def classify_reconciliation_row(row):
     return 'OTHER_DIFFERENCES'
 
 
-def decorate_reconciliation(rows, external_file, *, include_decisions=True):
-    decisions = ({
+def decorate_reconciliation(rows, external_file):
+    decisions = {
         decision.product_code_normalized: decision
         for decision in ProductReconciliationDecision.objects.filter(
             external_file=external_file
         )
-    } if include_decisions else {})
+    }
     for row in rows:
         row['group_key'] = classify_reconciliation_row(row)
         row['decision'] = decisions.get(row['sku'])
@@ -241,11 +241,8 @@ def rows_for_group(rows, group_key):
     return [row for row in rows if row['group_key'] == group_key]
 
 
-def build_workspace(external_file, *, source_rows=None, pending_rejected=None,
-                    include_decisions=True):
-    rows, summary = build_product_reconciliation(
-        external_file, source_rows=source_rows, pending_rejected=pending_rejected,
-    )
+def build_workspace(external_file):
+    rows, summary = build_product_reconciliation(external_file)
     for row in rows:
         apply_freight_type_rule(row)
         apply_dimension_unit_warning(row)
@@ -261,7 +258,7 @@ def build_workspace(external_file, *, source_rows=None, pending_rejected=None,
         ),
     })
     memory_counts = attach_product_reconciliation_memory(rows, external_file)
-    decorate_reconciliation(rows, external_file, include_decisions=include_decisions)
+    decorate_reconciliation(rows, external_file)
     summary['group_counts'] = reconciliation_group_counts(rows)
     summary['memory_exact'] = memory_counts['EXACT']
     summary['memory_source_changed'] = memory_counts['SOURCE_CHANGED']

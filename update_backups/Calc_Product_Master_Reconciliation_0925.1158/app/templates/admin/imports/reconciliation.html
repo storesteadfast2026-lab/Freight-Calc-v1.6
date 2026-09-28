@@ -30,7 +30,7 @@
 {% endblock %}
 
 {% block breadcrumbs %}
-<div class="breadcrumbs"><a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo; <a href="{{ back_url }}">{{ back_label|default:'External data files' }}</a> &rsaquo; {{ title }}</div>
+<div class="breadcrumbs"><a href="{% url 'admin:index' %}">{% translate 'Home' %}</a> &rsaquo; <a href="{{ back_url }}">External data files</a> &rsaquo; {{ title }}</div>
 {% endblock %}
 
 {% block content %}
@@ -82,7 +82,7 @@
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.name|default:"—" }}{% if row.source_values.description %}<br><small>{{ row.source_values.description }}</small>{% endif %}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.name|default:"—" }}{% if row.operational_values.description %}<br><small>{{ row.operational_values.description }}</small>{% endif %}</div></td>
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.length_m|stringformat:"s"|default:"—" }} × {{ row.source_values.width_m|stringformat:"s"|default:"—" }} × {{ row.source_values.height_m|stringformat:"s"|default:"—" }}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.length_m|stringformat:"s"|default:"—" }} × {{ row.operational_values.width_m|stringformat:"s"|default:"—" }} × {{ row.operational_values.height_m|stringformat:"s"|default:"—" }}</div></td>
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.weight_kg|stringformat:"s"|default:"—" }} kg · {{ row.source_values.cubic_m3|stringformat:"s"|default:"—" }} m³<br>Qty {{ row.source_values.quantity|stringformat:"s"|default:"—" }}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.weight_kg|stringformat:"s"|default:"—" }} kg · {{ row.operational_values.cubic_m3|stringformat:"s"|default:"—" }} m³</div></td>
-      <td>{% if row.memory_state == 'EXACT' %}<span class="recon-badge">PREVIOUSLY RESOLVED · IDENTICAL SOURCE</span>{% elif row.memory_state == 'SOURCE_CHANGED' %}<span class="recon-badge">PREVIOUS SOLUTION · SOURCE CHANGED</span>{% endif %}{% for rule in row.matching_rules %}<span class="recon-badge">RULE: {{ rule.name }}</span>{% endfor %}{% for warning in row.warnings %}<span class="recon-badge">{{ warning }}</span>{% empty %}{% if not row.memory %}—{% endif %}{% endfor %}{% if row.source_values.comment %}<br><details><summary>Source comment</summary>{{ row.source_values.comment }}</details>{% endif %}</td>
+      <td>{% for warning in row.warnings %}<span class="recon-badge">{{ warning }}</span>{% empty %}—{% endfor %}{% if row.source_values.comment %}<br><details><summary>Source comment</summary>{{ row.source_values.comment }}</details>{% endif %}</td>
     </tr>
   {% empty %}<tr><td colspan="6">No records match this filter.</td></tr>{% endfor %}
   </tbody>

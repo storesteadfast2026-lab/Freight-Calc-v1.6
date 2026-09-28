@@ -18,7 +18,6 @@ from apps.imports.services.product_reconciliation_memory import (
 )
 from apps.imports.services.product_reconciliation_workspace import (
     build_workspace, has_active_product_apply, preview_decision, validate_field_decisions,
-    RECONCILABLE_FIELDS,
 )
 from apps.products.models import Product
 
@@ -82,150 +81,6 @@ def _protects_zero_source_dimensions(row, decisions):
         and _valid_operational_dimensions(row)
         and decisions.get('dimensions') == 'OPERATIONAL'
     )
-
-
-def _explicitly_keeps_a_difference(row, decisions):
-    """A reviewed Calculator value may intentionally leave a Source difference."""
-    return any(
-        field in row['changed_fields'] and decisions.get(field) == 'OPERATIONAL'
-        for field in RECONCILABLE_FIELDS
-    )
-
-
-def corrected_skus_for_source(source):
-    return set(
-        ProductCorrectionDecision.objects.filter(
-            round__external_file=source, round__status='APPLIED',
-        ).values_list('sku', flat=True)
-    )
-
-
-@transaction.atomic
-def save_inline_correction_decisions(round_id, *, entries, actor=None, request=None):
-    """Save selected inline rows into the existing round, with one workspace build."""
-    round_obj = ProductCorrectionRound.objects.select_for_update().select_related('external_file').get(pk=round_id)
-    if round_obj.status != 'DRAFT' or not has_active_product_apply(round_obj.external_file):
-        raise CorrectionRoundError('This round is no longer editable.')
-    selected = list(entries)
-    if not selected or len({entry['sku'] for entry in selected}) != len(selected):
-        raise CorrectionRoundError('Select distinct Product rows to save.')
-    rows, _ = _rows(round_obj.external_file)
-    corrected = corrected_skus_for_source(round_obj.external_file)
-    for entry in selected:
-        sku = entry['sku']
-        if sku in corrected and not entry.get('allow_reopen'):
-            raise CorrectionRoundError(f'{sku}: confirm individual review of this previously corrected SKU.')
-        row = rows.get(sku)
-        if not row or not row.get('product') or row['product'].client_id != round_obj.external_file.client_id:
-            raise CorrectionRoundError(f'{sku}: no matched Product in this Calculator Customer.')
-        _save_decision_for_row(
-            round_obj, row=row,
-            field_decisions=entry['field_decisions'],
-            custom_values=entry.get('custom_values'), notes=entry.get('notes'),
-            confirm_source_dimensions=entry.get('confirm_source_dimensions', False),
-            actor=actor, request=request,
-        )
-    return len(selected)
-
-
-def bulk_field_candidates(round_obj, skus, *, field, authority, row_map=None):
-    """Preview eligibility for changing one authority, using this source's rows."""
-    if field not in RECONCILABLE_FIELDS or authority not in {'SOURCE', 'OPERATIONAL', 'CLEAR'}:
-        raise CorrectionRoundError('Choose a valid field and bulk action.')
-    if round_obj.status != 'DRAFT' or not has_active_product_apply(round_obj.external_file):
-        raise CorrectionRoundError('This round is no longer editable.')
-    selected = list(dict.fromkeys(str(sku).strip() for sku in skus if str(sku).strip()))
-    if not selected:
-        raise CorrectionRoundError('Select at least one Product.')
-    rows = row_map if row_map is not None else _rows(round_obj.external_file)[0]
-    existing = {d.sku: d for d in round_obj.decisions.filter(sku__in=selected)}
-    corrected = corrected_skus_for_source(round_obj.external_file)
-    eligible, excluded = [], []
-    for sku in selected:
-        row, previous = rows.get(sku), existing.get(sku)
-        if not row or row.get('status') != 'DIFFERENT' or not row.get('source') or not row.get('product') or row['product'].client_id != round_obj.external_file.client_id:
-            reason = 'No matched Product with a remaining difference for this Calculator Customer.'
-        elif sku in corrected:
-            reason = 'Already corrected in an applied round; use explicit individual review.'
-        elif field not in row['changed_fields'] and not previous:
-            reason = 'This field does not differ for the selected Product.'
-        elif authority == 'CLEAR' and (not previous or previous.field_decisions.get(field, 'NO_CHANGE') == 'NO_CHANGE'):
-            reason = 'No saved decision for this field in this round.'
-        elif authority != 'CLEAR' and previous and previous.field_decisions.get(field) == authority:
-            reason = 'This decision is already saved in this round.'
-        elif authority != 'CLEAR' and field not in row['changed_fields']:
-            reason = 'This field does not differ for the selected Product.'
-        elif field == 'dimensions' and authority == 'SOURCE' and (
-            'SOURCE_DIMENSIONS_ZERO' in row['warnings'] or row.get('dimension_unit_review_required')
-        ):
-            reason = 'Source dimensions require individual review.'
-        elif field == 'dimensions' and authority == 'OPERATIONAL' and is_zero_source_dimensions_candidate(row) and not _valid_operational_dimensions(row):
-            reason = 'Current Calculator dimensions must all be greater than zero.'
-        elif field == 'freight_type' and authority == 'SOURCE' and row['source_values'].get('freight_type') not in {'C', 'P'}:
-            reason = 'Source C/P requires individual review.'
-        else:
-            reason = ''
-        if reason:
-            excluded.append({'sku': sku, 'reason': reason})
-        else:
-            eligible.append(sku)
-    return {'eligible': eligible, 'excluded': excluded}
-
-
-@transaction.atomic
-def save_bulk_field_decisions(round_id, *, skus, expected_eligible, field,
-                              authority, notes, actor=None, request=None):
-    """Modify just one field of each existing correction decision."""
-    round_obj = ProductCorrectionRound.objects.select_for_update().select_related('external_file').get(pk=round_id)
-    notes = str(notes or '').strip()
-    if not notes:
-        raise CorrectionRoundError('Enter a bulk reason for the selected decision.')
-    rows, _ = _rows(round_obj.external_file)
-    plan = bulk_field_candidates(round_obj, skus, field=field, authority=authority, row_map=rows)
-    if not plan['eligible'] or plan['eligible'] != list(expected_eligible):
-        raise CorrectionRoundError('Eligibility changed since Preview. Review the selected SKUs again.')
-    previous_by_sku = {d.sku: d for d in round_obj.decisions.filter(sku__in=plan['eligible'])}
-    for sku in plan['eligible']:
-        previous = previous_by_sku.get(sku)
-        decisions = dict(previous.field_decisions) if previous else {}
-        decisions[field] = 'NO_CHANGE' if authority == 'CLEAR' else authority
-        custom = dict(previous.custom_values) if previous else {}
-        if authority != 'CUSTOM':
-            keys = {'dimensions': ('length_m', 'width_m', 'height_m'),
-                    'weight': ('weight_kg',), 'cubic': ('cubic_m3',)}.get(field, (field,))
-            for key in keys:
-                custom.pop(key, None)
-        remaining = any(decisions.get(key, 'NO_CHANGE') != 'NO_CHANGE' for key in RECONCILABLE_FIELDS)
-        if authority == 'CLEAR' and not remaining:
-            previous.delete()
-            create_audit_event(
-                event_type='PRODUCT_CORRECTION_DRAFT_CLEARED',
-                message=f'{sku}: correction draft cleared. {notes}',
-                actor=actor, client=round_obj.external_file.client,
-                external_file=round_obj.external_file,
-                metadata={'round_id': round_obj.pk, 'sku': sku, 'field': field,
-                          'reason': notes, 'operational_tables_updated': False}, request=request,
-            )
-            continue
-        prior_note = previous.notes if previous else ''
-        combined_note = f'{prior_note}\nBulk {field}: {notes}' if prior_note else notes
-        _save_decision_for_row(
-            round_obj, row=rows[sku], field_decisions=decisions,
-            custom_values=custom, notes=combined_note,
-            confirm_source_dimensions=previous.confirm_source_dimensions if previous else False,
-            actor=actor, request=request,
-        )
-    create_audit_event(
-        event_type='PRODUCT_CORRECTION_BULK_FIELD_DRAFT_SAVED',
-        message=f"{len(plan['eligible'])} Product {field} correction decision(s) saved.",
-        actor=actor, client=round_obj.external_file.client,
-        external_file=round_obj.external_file,
-        metadata={'round_id': round_obj.pk, 'field': field, 'authority': authority,
-                  'reason': notes, 'included_skus': plan['eligible'],
-                  'excluded_skus': [item['sku'] for item in plan['excluded']],
-                  'operational_tables_updated': False}, request=request,
-    )
-    return plan
 
 
 def bulk_dimension_candidates(round_obj, skus, *, row_map=None):
@@ -335,7 +190,7 @@ def _save_decision_for_row(round_obj, *, row, field_decisions, custom_values,
     proposed = preview_decision(row, SimpleNamespace(field_decisions=decisions, custom_values=custom, row_action='UPDATE'))['proposed_values']
     if proposed.get('freight_type') not in {'C', 'P'}:
         raise CorrectionRoundError('C/P must be Case or Pallet.')
-    if not _proposed_changes(row, proposed) and not _explicitly_keeps_a_difference(row, decisions):
+    if not _proposed_changes(row, proposed) and not _protects_zero_source_dimensions(row, decisions):
         raise CorrectionRoundError('This decision would not change the operational Product.')
     before = _product_snapshot(row['product'])
     fingerprint = canonical_fingerprint(product_memory_source_data(row))
@@ -386,7 +241,7 @@ def correction_preview(round_obj):
         if item and item['proposed_values'].get('freight_type') not in {'C', 'P'}:
             errors.append('C/P must be Case or Pallet.')
         if item:
-            if not _proposed_changes(row, item['proposed_values']) and not _explicitly_keeps_a_difference(row, decision.field_decisions):
+            if not _proposed_changes(row, item['proposed_values']) and not _protects_zero_source_dimensions(row, decision.field_decisions):
                 errors.append('No operational values would change.')
             if decision.field_decisions.get('dimensions') == 'OPERATIONAL' and is_zero_source_dimensions_candidate(row) and not _valid_operational_dimensions(row):
                 errors.append('Current Calculator dimensions must all be greater than zero.')

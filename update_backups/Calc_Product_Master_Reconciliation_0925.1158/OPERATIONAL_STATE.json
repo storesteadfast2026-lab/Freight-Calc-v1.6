@@ -1,0 +1,11 @@
+﻿{
+    "audit_events":  151,
+    "correction_rounds":  3,
+    "external_files":  11,
+    "product_masters":  2,
+    "product_state_sha256":  "79d763f9c59fd197a50758831e404d0b5e82286d24370e9905e034cc0745d472",
+    "products":  229,
+    "quotations":  15,
+    "reconciliation_decisions":  232,
+    "reconciliation_memory":  253
+}

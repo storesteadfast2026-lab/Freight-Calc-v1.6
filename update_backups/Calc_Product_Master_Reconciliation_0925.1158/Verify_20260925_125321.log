@@ -1,0 +1,26 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260925125321
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Product_Master_Reconciliation_0925.1158\Calc_Product_Master_Reconciliation_0925.1158\Verify_Update.ps1
+Process ID: 8736
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+System check identified no issues (0 silenced).
+No changes detected
+{"migration_applied": true, "product_masters": 2, "external_files": 11, "products": 229}
+Read-only Product Master reconciliation bridge verified.
+**********************
+Windows PowerShell transcript end
+End time: 20260925125327
+**********************
