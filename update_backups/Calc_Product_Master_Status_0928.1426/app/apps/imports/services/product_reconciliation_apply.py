@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import copy
-from decimal import Decimal, InvalidOperation
 from uuid import uuid4
-from django.core.exceptions import ValidationError
 
 from django.db import models, transaction
 from django.utils import timezone
@@ -30,25 +28,6 @@ PRODUCT_FIELDS = (
     'name', 'description', 'length_m', 'width_m', 'height_m',
     'weight_kg', 'cubic_m3', 'freight_type', 'active', 'source_row',
 )
-
-
-def new_product_values(proposed):
-    """Normalise only exact decimal representations; never round Source silently."""
-    values = {key: proposed[key] for key in (
-        'name', 'description', 'length_m', 'width_m', 'height_m',
-        'weight_kg', 'cubic_m3', 'freight_type',
-    )}
-    for key, places in (('length_m', 4), ('width_m', 4), ('height_m', 4),
-                        ('weight_kg', 4), ('cubic_m3', 6)):
-        try:
-            value = Decimal(values[key])
-            exact = value.quantize(Decimal(1).scaleb(-places))
-        except (InvalidOperation, ValueError, TypeError) as exc:
-            raise ValidationError(f'{key} is outside operational precision.') from exc
-        if value != exact:
-            raise ValidationError(f'{key} exceeds operational precision.')
-        values[key] = exact
-    return values
 
 
 class ProductReconciliationApplyBlocked(ProductReconciliationWorkspaceError):
@@ -180,27 +159,8 @@ def build_product_apply_plan(external_file_id):
                         'Product is referenced by kits or saved quotations and cannot be removed.'
                     )
         else:
-            is_master_creation = bool(
-                (external_file.import_summary or {}).get('product_master_id')
-                and row['status'] == 'SOURCE_ONLY'
-                and not row.get('product') and row.get('source')
-            )
-            item['operation'] = 'CREATE' if is_master_creation else 'UPDATE'
-            if not is_master_creation and (not row.get('product') or not row.get('source')):
+            if not row.get('product') or not row.get('source'):
                 item_blockers.append('Updates require both Source and operational Product rows.')
-            if is_master_creation:
-                if decision.row_status != 'SOURCE_ONLY' or decision.row_action != 'UPDATE':
-                    item_blockers.append('Only reviewed Source-only rows can be imported.')
-                if any(row['source_values'].get(key) is None for key in ('weight_kg', 'cubic_m3')):
-                    item_blockers.append('Weight and cubic must be provided for new Products.')
-                proposed = item['proposed_values']
-                try:
-                    values = new_product_values(proposed)
-                    Product(client=external_file.client, sku=row['sku'], active=True,
-                            source_row=row['source_row_number'],
-                            **values).full_clean(validate_unique=False)
-                except ValidationError as exc:
-                    item_blockers.append(f'Invalid Product values: {exc}')
             if (
                 decision.field_decisions.get('dimensions') == 'SOURCE'
                 and ('SOURCE_DIMENSIONS_ZERO' in row['warnings']
@@ -218,8 +178,7 @@ def build_product_apply_plan(external_file_id):
         'external_file': external_file,
         'items': items,
         'decision_count': len(items),
-        'update_count': sum(item.get('operation') == 'UPDATE' for item in items),
-        'create_count': sum(item.get('operation') == 'CREATE' for item in items),
+        'update_count': sum(item['row_action'] == 'UPDATE' for item in items),
         'delete_count': sum(item['row_action'] == 'DELETE' for item in items),
         'blockers': blockers,
         'can_apply': bool(items) and not blockers,
@@ -247,21 +206,12 @@ def apply_product_reconciliation(external_file_id, *, actor=None, request=None):
     for item in plan['items']:
         row = item['row']
         decision = item['decision']
-        operation = item.get('operation', decision.row_action)
-        product = None if operation == 'CREATE' else Product.objects.select_for_update().get(
-            pk=row['product'].pk, client=external_file.client,
+        product = Product.objects.select_for_update().get(
+            pk=row['product'].pk,
+            client=external_file.client,
         )
-        before = _product_snapshot(product) if product else None
-        if operation == 'CREATE':
-            proposed = item['proposed_values']
-            product = Product.objects.create(
-                client=external_file.client, sku=row['sku'], active=True,
-                source_row=row['source_row_number'],
-                **new_product_values(proposed),
-            )
-            product.refresh_from_db()
-            after = _product_snapshot(product)
-        elif decision.row_action == 'DELETE':
+        before = _product_snapshot(product)
+        if decision.row_action == 'DELETE':
             product.delete()
             after = None
         else:
@@ -279,7 +229,7 @@ def apply_product_reconciliation(external_file_id, *, actor=None, request=None):
             after = _product_snapshot(product)
         changes.append({
             'sku': row['sku'],
-            'operation': operation,
+            'operation': decision.row_action,
             'before': before,
             'after': after,
         })
@@ -322,7 +272,6 @@ def apply_product_reconciliation(external_file_id, *, actor=None, request=None):
         metadata={
             'batch_id': batch_id,
             'update_count': plan['update_count'],
-            'create_count': plan['create_count'],
             'delete_count': plan['delete_count'],
             'skus': [change['sku'] for change in changes],
             'correction_memory_ids': memory_ids[:500],
@@ -354,21 +303,6 @@ def rollback_latest_product_apply(external_file_id, *, actor=None, request=None)
         raise ProductReconciliationApplyBlocked('There is no Product Apply batch to roll back.')
     for change in reversed(batch['changes']):
         before = change['before']
-        if change['operation'] == 'CREATE':
-            after = change['after']
-            current = Product.objects.select_for_update().filter(
-                pk=after['id'], client=external_file.client, sku=after['sku'],
-            ).first()
-            if not current or _product_snapshot(current) != after:
-                raise ProductReconciliationApplyBlocked(
-                    f'{after["sku"]}: imported Product has changed; rollback is blocked.'
-                )
-            if product_reference_summary(current)['total']:
-                raise ProductReconciliationApplyBlocked(
-                    f'{after["sku"]}: imported Product is referenced; rollback is blocked.'
-                )
-            current.delete()
-            continue
         current = Product.objects.filter(
             client=external_file.client,
             sku=before['sku'],

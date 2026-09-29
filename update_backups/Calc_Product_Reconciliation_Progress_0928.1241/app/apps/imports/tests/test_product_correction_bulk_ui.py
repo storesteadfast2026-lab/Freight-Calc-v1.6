@@ -1,6 +1,5 @@
 """Inline and field-scoped bulk decisions in the existing correction round."""
 from decimal import Decimal
-from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -9,12 +8,8 @@ from django.urls import reverse
 from apps.clients.models import Client
 from apps.imports.models import (
     ExternalDataFile, ProductCorrectionDecision, ProductCorrectionRound,
-    ProductSourceRow, ProductReconciliationDecision,
+    ProductSourceRow,
 )
-from apps.imports.admin_reconciliation import (
-    ProductReconciliationWorkflow, reconciliation_progress, rows_for_review_status,
-)
-from apps.imports.services.product_reconciliation_workspace import build_workspace
 from apps.imports.services.product_correction_rounds import (
     CorrectionRoundError, apply_correction_round, bulk_field_candidates,
     correction_preview, rollback_correction_round, save_bulk_field_decisions,
@@ -117,142 +112,6 @@ class ProductCorrectionBulkUiTests(TestCase):
         self.assertEqual(self.product.cubic_m3, Decimal('1'))
         rollback_correction_round(self.round.pk, actor=self.user)
         self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-
-    def test_reconciliation_shows_pending_state_and_physical_differences_separately(self):
-        self.client.force_login(self.user)
-        response = self.client.post(f'{self.url}?mode=correction&round={self.round.pk}', {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'weight', 'authority': 'SOURCE',
-        })
-        self.assertEqual(response.status_code, 200)
-        response = self.client.get(self.url)
-        self.assertContains(response, 'Pending points')
-        self.assertContains(response, 'Physical differences')
-        self.assertContains(response, 'Open Correction Round')
-        self.assertContains(response, 'Last Correction Round')
-        self.assertEqual(response.context['progress']['open_round'].pk, self.round.pk)
-        self.assertGreaterEqual(response.context['progress']['physical'], 1)
-
-    def test_review_status_filter_uses_existing_states_without_changing_product(self):
-        self.client.force_login(self.user)
-        before = list(Product.objects.filter(pk=self.product.pk).values())[0]
-        url = f'{self.url}?group=ALL&review_status=APPLIED&q=A1'
-        response = self.client.get(url)
-        self.assertEqual(response.context['result_count'], 1)
-        self.assertEqual(response.context['review_status'], 'APPLIED')
-        self.assertContains(response, 'name="review_status"')
-        self.assertContains(response, 'group=ALL&q=A1&review_status=DRAFT')
-        self.assertEqual(self.client.get(f'{self.url}?group=ALL&review_status=DRAFT&q=A1').context['result_count'], 0)
-        saved = self.client.post(f'{self.url}?mode=correction&round={self.round.pk}', {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'weight', 'authority': 'SOURCE',
-        })
-        self.assertEqual(saved.status_code, 200)
-        draft = self.client.get(f'{self.url}?group=ALL&review_status=DRAFT&q=A1')
-        self.assertEqual(draft.context['result_count'], 1)
-        self.assertEqual(draft.context['page_obj'][0]['sku'], 'A1')
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-
-    def test_review_status_options_keep_partial_separate_and_include_it_in_needs_review(self):
-        rows = [{'sku': sku, 'review_state': state} for sku, state in (
-            ('A1', 'needs_review'), ('B2', 'partial'), ('C3', 'draft'),
-            ('D4', 'applied'), ('E5', 'reference'),
-        )]
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'NEEDS_REVIEW')], ['A1', 'B2'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'PARTIAL')], ['B2'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'DRAFT')], ['C3'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'APPLIED')], ['D4'])
-        self.assertEqual(rows_for_review_status(rows, 'ALL'), rows)
-        self.client.force_login(self.user)
-        response = self.client.get(f'{self.url}?group=ALL_DIFFERENCES&review_status=UNKNOWN&q=A1')
-        self.assertEqual(response.context['review_status'], 'ALL')
-        self.assertEqual(response.context['search'], 'A1')
-        self.assertContains(response, 'group=ALL_DIFFERENCES&q=A1&review_status=ALL')
-
-    def test_review_filter_retains_group_search_and_pagination(self):
-        ProductSourceRow.objects.create(
-            external_file=self.source, source_row_number=3,
-            product_code_raw='A2', product_code_normalized='A2',
-            name='A2 reference only', length_mm=1000, width_mm=1000,
-            height_mm=1000, weight_kg=Decimal('1'), cubic_m3=Decimal('1'),
-            quantity=1, pallet=1,
-        )
-        self.client.force_login(self.user)
-        with patch.object(ProductReconciliationWorkflow, 'page_size', 1):
-            first = self.client.get(f'{self.url}?group=ALL&q=A&review_status=ALL')
-            self.assertEqual(first.context['result_count'], 2)
-            self.assertContains(first, 'group=ALL&q=A&review_status=ALL&page=2')
-            second = self.client.get(f'{self.url}?group=ALL&q=A&review_status=ALL&page=2')
-            self.assertEqual(second.context['page_obj'][0]['sku'], 'A2')
-            self.assertEqual(self.client.get(
-                f'{self.url}?group=ALL&q=A&review_status=APPLIED'
-            ).context['result_count'], 1)
-
-    def test_autosave_only_one_field_of_current_round_and_never_changes_product(self):
-        self.client.force_login(self.user)
-        before = list(Product.objects.filter(pk=self.product.pk).values())[0]
-        url = f'{self.url}?mode=correction&round={self.round.pk}'
-        response = self.client.post(url, {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'dimensions', 'authority': 'OPERATIONAL',
-        })
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['status'], 'saved')
-        response = self.client.post(url, {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'weight', 'authority': 'SOURCE',
-        })
-        self.assertEqual(response.status_code, 200)
-        decision = ProductCorrectionDecision.objects.get(round=self.round, sku='A1')
-        self.assertEqual(decision.field_decisions['dimensions'], 'OPERATIONAL')
-        self.assertEqual(decision.field_decisions['weight'], 'SOURCE')
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-        response = self.client.get(f'{url}&preview=1')
-        self.assertContains(response, 'Current → proposed values')
-        self.assertContains(response, 'Weight (kg)')
-        self.assertContains(response, 'Apply 1 correction(s)')
-
-    def test_autosave_rejects_unsafe_source_and_other_client_and_applied_round(self):
-        self.client.force_login(self.user)
-        url = f'{self.url}?mode=correction&round={self.round.pk}'
-        payload = {'correction_action': 'autosave_field', 'round_id': self.round.pk,
-                   'sku': 'A1', 'field': 'dimensions', 'authority': 'SOURCE'}
-        response = self.client.post(url, payload)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn('zero', response.json()['error'])
-        response = self.client.post(url, {**payload, 'sku': 'PON-ONLY', 'field': 'weight'})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.round.decisions.count(), 0)
-        self.client.post(url, {**payload, 'field': 'weight'})
-        response = self.client.post(url, {
-            'correction_action': 'apply', 'round_id': self.round.pk, 'confirm_apply': 'yes',
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('group=ALL_DIFFERENCES', response.url)
-        response = self.client.post(url, {**payload, 'field': 'cubic', 'authority': 'SOURCE'})
-        self.assertEqual(response.status_code, 400)
-        response = self.client.get(self.url)
-        self.assertContains(response, 'Resolved / Applied')
-
-    def test_partial_review_counts_only_unresolved_fields_and_requires_authorisation(self):
-        ProductReconciliationDecision.objects.filter(external_file=self.source).update(
-            field_decisions={'weight': 'OPERATIONAL'},
-        )
-        rows, _ = build_workspace(self.source)
-        summary = reconciliation_progress(self.source, rows)
-        self.assertEqual(summary['partial'], 1)
-        self.assertEqual(summary['products_needing_review'], 1)
-        self.assertIn('dimensions', rows[0]['pending_fields'])
-        other_user = get_user_model().objects.create_user(
-            username='not-a-manager', password='password', is_staff=False,
-        )
-        self.client.force_login(other_user)
-        response = self.client.post(f'{self.url}?mode=correction&round={self.round.pk}', {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'weight', 'authority': 'SOURCE',
-        })
-        self.assertNotEqual(response.status_code, 200)
-        self.assertEqual(self.round.decisions.count(), 0)
 
     def test_expanded_inline_custom_weight_and_source_cubic_keep_dimensions(self):
         self.client.force_login(self.user)

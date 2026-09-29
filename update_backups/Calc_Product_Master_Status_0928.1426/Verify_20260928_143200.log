@@ -1,0 +1,26 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260928143200
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Product_Master_Status_0928.1426\Calc_Product_Master_Status_0928.1426\Verify_Update.ps1
+Process ID: 1684
+PSVersion: 5.1.26100.9549
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9549
+BuildVersion: 10.0.26100.9549
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+
+{"migration_applied": true, "product_masters": 2, "external_files": 11, "products": 229}
+Product Master status and Source-only import verified.
+**********************
+Windows PowerShell transcript end
+End time: 20260928143206
+**********************

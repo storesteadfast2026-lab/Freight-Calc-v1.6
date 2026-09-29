@@ -128,41 +128,6 @@ def save_inline_correction_decisions(round_id, *, entries, actor=None, request=N
     return len(selected)
 
 
-@transaction.atomic
-def autosave_correction_field(round_id, *, sku, field, authority, notes=None,
-                              confirm_source_dimensions=False, allow_reopen=False,
-                              actor=None, request=None):
-    """Save one inline authority in the current draft; preserve every other field."""
-    round_obj = ProductCorrectionRound.objects.select_for_update().select_related('external_file').get(pk=round_id)
-    if round_obj.status != 'DRAFT' or not has_active_product_apply(round_obj.external_file):
-        raise CorrectionRoundError('This correction round is no longer editable.')
-    if field not in RECONCILABLE_FIELDS or authority not in {'SOURCE', 'OPERATIONAL'}:
-        raise CorrectionRoundError('Select Use Source or Keep Calculator for a different field.')
-    rows, _ = _rows(round_obj.external_file)
-    row = rows.get(sku)
-    if not row or row.get('status') != 'DIFFERENT' or field not in row['changed_fields'] or not row.get('product') or row['product'].client_id != round_obj.external_file.client_id:
-        raise CorrectionRoundError('This SKU and field have no eligible difference in this Calculator Customer.')
-    if sku in corrected_skus_for_source(round_obj.external_file) and not allow_reopen:
-        raise CorrectionRoundError('Confirm individual re-review of this previously corrected SKU.')
-    previous = round_obj.decisions.select_for_update().filter(sku=sku).first()
-    decisions = dict(previous.field_decisions) if previous else {}
-    decisions[field] = authority
-    custom = dict(previous.custom_values) if previous else {}
-    keys = {'dimensions': ('length_m', 'width_m', 'height_m'),
-            'weight': ('weight_kg',), 'cubic': ('cubic_m3',)}.get(field, (field,))
-    for key in keys:
-        custom.pop(key, None)
-    reason = str(notes or '').strip() or (previous.notes if previous else '')
-    if not reason:
-        reason = f'Inline review: {field} — {"Use Source" if authority == "SOURCE" else "Keep Calculator"}.'
-    return _save_decision_for_row(
-        round_obj, row=row, field_decisions=decisions, custom_values=custom,
-        notes=reason, confirm_source_dimensions=(
-            confirm_source_dimensions or (previous.confirm_source_dimensions if previous else False)
-        ), actor=actor, request=request,
-    )
-
-
 def bulk_field_candidates(round_obj, skus, *, field, authority, row_map=None):
     """Preview eligibility for changing one authority, using this source's rows."""
     if field not in RECONCILABLE_FIELDS or authority not in {'SOURCE', 'OPERATIONAL', 'CLEAR'}:

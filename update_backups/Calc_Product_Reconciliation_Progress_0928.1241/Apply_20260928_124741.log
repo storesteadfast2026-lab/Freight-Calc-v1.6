@@ -1,0 +1,54 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260928124741
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Product_Reconciliation_Progress_0928.1241\Calc_Product_Reconciliation_Progress_0928.1241\Apply_Update.ps1
+Process ID: 15940
+PSVersion: 5.1.26100.9549
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9549
+BuildVersion: 10.0.26100.9549
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Baseline content matches; line-ending difference only: C:\Docker-Projects\Freight-Calc-v1.6\app\apps\imports\services\product_correction_rounds.py
+Baseline content matches; line-ending difference only: C:\Docker-Projects\Freight-Calc-v1.6\app\apps\imports\tests\test_product_correction_bulk_ui.py
+Baseline content matches; line-ending difference only: C:\Docker-Projects\Freight-Calc-v1.6\app\templates\admin\imports\product_correction_round.html
+
+
+
+[+] copy 1/1
+ ✔ freight-calc-v16-db-1 Copied freight-calc-v16-db-1:/tmp/calc_product_master_2c0cfcca386e4b8ca0b0d8b55e654ab8.dump to C:\D... 0.1s
+
+[+] stop 1/1
+ ✔ Container freight-calc-v16-web-1 Stopped                                                                                     3.5s
+Container freight-calc-v16-web-run-d94e44734cfa Creating
+Container freight-calc-v16-web-run-d94e44734cfa Created
+Found 249 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+....................................................................................................................................
+..............................................................Repair review cleanup complete: 1 file(s), 1 staging object(s) removed
+.
+.......................................................
+----------------------------------------------------------------------
+Ran 249 tests in 8.632s
+
+OK
+Destroying test database for alias 'default'...
+[+] up 2/2
+ ✔ Container freight-calc-v16-db-1  Running                                                                                     0.0s
+ ✔ Container freight-calc-v16-web-1 Started                                                                                     0.1s
+System check identified no issues (0 silenced).
+No changes detected
+Product Reconciliation progress and draft autosave installed; operational data unchanged.
+Backup: C:\Docker-Projects\Freight-Calc-v1.6\update_backups\Calc_Product_Reconciliation_Progress_0928.1241
+**********************
+Windows PowerShell transcript end
+End time: 20260928124812
+**********************

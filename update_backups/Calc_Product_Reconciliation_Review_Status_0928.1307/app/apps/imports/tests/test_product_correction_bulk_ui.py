@@ -1,6 +1,5 @@
 """Inline and field-scoped bulk decisions in the existing correction round."""
 from decimal import Decimal
-from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,9 +10,7 @@ from apps.imports.models import (
     ExternalDataFile, ProductCorrectionDecision, ProductCorrectionRound,
     ProductSourceRow, ProductReconciliationDecision,
 )
-from apps.imports.admin_reconciliation import (
-    ProductReconciliationWorkflow, reconciliation_progress, rows_for_review_status,
-)
+from apps.imports.admin_reconciliation import reconciliation_progress
 from apps.imports.services.product_reconciliation_workspace import build_workspace
 from apps.imports.services.product_correction_rounds import (
     CorrectionRoundError, apply_correction_round, bulk_field_candidates,
@@ -132,61 +129,6 @@ class ProductCorrectionBulkUiTests(TestCase):
         self.assertContains(response, 'Last Correction Round')
         self.assertEqual(response.context['progress']['open_round'].pk, self.round.pk)
         self.assertGreaterEqual(response.context['progress']['physical'], 1)
-
-    def test_review_status_filter_uses_existing_states_without_changing_product(self):
-        self.client.force_login(self.user)
-        before = list(Product.objects.filter(pk=self.product.pk).values())[0]
-        url = f'{self.url}?group=ALL&review_status=APPLIED&q=A1'
-        response = self.client.get(url)
-        self.assertEqual(response.context['result_count'], 1)
-        self.assertEqual(response.context['review_status'], 'APPLIED')
-        self.assertContains(response, 'name="review_status"')
-        self.assertContains(response, 'group=ALL&q=A1&review_status=DRAFT')
-        self.assertEqual(self.client.get(f'{self.url}?group=ALL&review_status=DRAFT&q=A1').context['result_count'], 0)
-        saved = self.client.post(f'{self.url}?mode=correction&round={self.round.pk}', {
-            'correction_action': 'autosave_field', 'round_id': self.round.pk,
-            'sku': 'A1', 'field': 'weight', 'authority': 'SOURCE',
-        })
-        self.assertEqual(saved.status_code, 200)
-        draft = self.client.get(f'{self.url}?group=ALL&review_status=DRAFT&q=A1')
-        self.assertEqual(draft.context['result_count'], 1)
-        self.assertEqual(draft.context['page_obj'][0]['sku'], 'A1')
-        self.assertEqual(list(Product.objects.filter(pk=self.product.pk).values())[0], before)
-
-    def test_review_status_options_keep_partial_separate_and_include_it_in_needs_review(self):
-        rows = [{'sku': sku, 'review_state': state} for sku, state in (
-            ('A1', 'needs_review'), ('B2', 'partial'), ('C3', 'draft'),
-            ('D4', 'applied'), ('E5', 'reference'),
-        )]
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'NEEDS_REVIEW')], ['A1', 'B2'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'PARTIAL')], ['B2'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'DRAFT')], ['C3'])
-        self.assertEqual([row['sku'] for row in rows_for_review_status(rows, 'APPLIED')], ['D4'])
-        self.assertEqual(rows_for_review_status(rows, 'ALL'), rows)
-        self.client.force_login(self.user)
-        response = self.client.get(f'{self.url}?group=ALL_DIFFERENCES&review_status=UNKNOWN&q=A1')
-        self.assertEqual(response.context['review_status'], 'ALL')
-        self.assertEqual(response.context['search'], 'A1')
-        self.assertContains(response, 'group=ALL_DIFFERENCES&q=A1&review_status=ALL')
-
-    def test_review_filter_retains_group_search_and_pagination(self):
-        ProductSourceRow.objects.create(
-            external_file=self.source, source_row_number=3,
-            product_code_raw='A2', product_code_normalized='A2',
-            name='A2 reference only', length_mm=1000, width_mm=1000,
-            height_mm=1000, weight_kg=Decimal('1'), cubic_m3=Decimal('1'),
-            quantity=1, pallet=1,
-        )
-        self.client.force_login(self.user)
-        with patch.object(ProductReconciliationWorkflow, 'page_size', 1):
-            first = self.client.get(f'{self.url}?group=ALL&q=A&review_status=ALL')
-            self.assertEqual(first.context['result_count'], 2)
-            self.assertContains(first, 'group=ALL&q=A&review_status=ALL&page=2')
-            second = self.client.get(f'{self.url}?group=ALL&q=A&review_status=ALL&page=2')
-            self.assertEqual(second.context['page_obj'][0]['sku'], 'A2')
-            self.assertEqual(self.client.get(
-                f'{self.url}?group=ALL&q=A&review_status=APPLIED'
-            ).context['result_count'], 1)
 
     def test_autosave_only_one_field_of_current_round_and_never_changes_product(self):
         self.client.force_login(self.user)

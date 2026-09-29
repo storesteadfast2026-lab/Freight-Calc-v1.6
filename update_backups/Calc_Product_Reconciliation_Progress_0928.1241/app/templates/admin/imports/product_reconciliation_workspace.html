@@ -9,9 +9,6 @@
   .workspace-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:16px 0; }
   .workspace-card { border:1px solid var(--hairline-color); padding:10px 12px; background:var(--body-bg); }
   .workspace-card strong { display:block; font-size:20px; }
-  .workspace-card a { display:block; color:inherit; text-decoration:none; }
-  .workspace-card a:hover,.workspace-card a:focus { text-decoration:underline; }
-  .workspace-card.selected { outline:2px solid var(--link-fg); }
   .workspace-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
   .workspace-layout { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
   .workspace-groups,.workspace-main,.workspace-editor,.workspace-rules { border:1px solid var(--hairline-color); background:var(--body-bg); }
@@ -54,12 +51,6 @@
   .workspace-rules { margin-top:14px; }
   .workspace-rule { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--hairline-color); }
   .workspace-paginator { margin-top:12px; }
-  .workspace-status { display:inline-block; padding:3px 7px; border-radius:4px; font-weight:bold; }
-  .workspace-status.needs_review,.workspace-status.partial { background:#fce7e7; color:#822; }
-  .workspace-status.draft { background:#fff1c7; color:#654400; }
-  .workspace-status.applied { background:#def2e3; color:#16582b; }
-  .workspace-progress { padding:12px; border:1px solid var(--hairline-color); margin:12px 0; }
-  .workspace-progress ol { display:flex; flex-wrap:wrap; gap:8px 20px; padding-left:22px; }
   @media (max-width:900px) {
     .workspace-layout { grid-template-columns:1fr; }
     .workspace-editor-grid { grid-template-columns:1fr 1fr; }
@@ -74,26 +65,6 @@
 {% block content %}
 <p>{{ page_description }}</p>
 <p><strong>{{ source.original_filename }}</strong> · {{ source.client.code }}</p>
-
-<section class="workspace-progress" aria-label="Reconciliation progress">
-  <strong>Source → Reconciliation → Review → Draft → Preview → Apply → Complete</strong>
-  <p>Current stage: {% if preview_mode %}<strong>Preview</strong>{% elif progress.open_round %}<strong>Correction Round {{ progress.open_round.pk }} · Draft</strong>{% elif progress.draft_decisions %}<strong>Draft · Preview next</strong>{% elif active_apply %}<strong>Applied · review remaining differences</strong>{% else %}<strong>Review</strong>{% endif %}</p>
-  <div class="workspace-summary">
-    <div class="workspace-card{% if review_status == 'NEEDS_REVIEW' %} selected{% endif %}"><a href="?group=ALL&q={{ search|urlencode }}&review_status=NEEDS_REVIEW">🔴 Needs review<strong>{{ progress.products_needing_review }}</strong></a></div>
-    <div class="workspace-card{% if review_status == 'DRAFT' %} selected{% endif %}"><a href="?group=ALL&q={{ search|urlencode }}&review_status=DRAFT">🟡 In review / Draft<strong>{{ progress.draft }}</strong></a></div>
-    <div class="workspace-card{% if review_status == 'APPLIED' %} selected{% endif %}"><a href="?group=ALL&q={{ search|urlencode }}&review_status=APPLIED">🟢 Resolved / Applied<strong>{{ progress.applied }}</strong></a></div>
-    <div class="workspace-card{% if review_status == 'PARTIAL' %} selected{% endif %}"><a href="?group=ALL&q={{ search|urlencode }}&review_status=PARTIAL">Partially reviewed<strong>{{ progress.partial }}</strong></a></div>
-    <div class="workspace-card">Physical differences<strong>{{ progress.physical }}</strong></div>
-  </div>
-  <strong>Pending points</strong>
-  <p>{{ progress.products_needing_review }} products needing review · {{ progress.draft_decisions }} draft decisions waiting for Apply · {{ progress.partial }} partially reviewed products · Open Correction Round: {% if progress.open_round %}<a href="?mode=correction&round={{ progress.open_round.pk }}">{{ progress.open_round.pk }}</a>{% else %}none{% endif %}.</p>
-  <p>Physical differences can remain after an applied decision to keep Calculator values.</p>
-  <div class="workspace-actions">
-    {% if progress.open_round and can_manage %}<a class="button default" href="?mode=correction&round={{ progress.open_round.pk }}&preview=1">Preview {{ progress.draft_decisions }} corrections →</a>
-    {% elif progress.draft_decisions and not active_apply %}<a class="button default" href="?mode=preview">Preview {{ progress.draft_decisions }} corrections →</a>{% endif %}
-    {% if progress.products_needing_review %}<a class="button" href="{% if progress.open_round %}?mode=correction&round={{ progress.open_round.pk }}{% else %}?group=ALL_DIFFERENCES{% endif %}">Continue reviewing</a>{% endif %}
-  </div>
-</section>
 
 {% if blocked %}
 <div class="workspace-warning"><strong>Comparison is not ready.</strong> {{ summary.pending_rejected }} rejected row(s) still require approval. Complete rejected-row review first.</div>
@@ -122,7 +93,7 @@
 </div>
 
 <div class="workspace-actions">
-  <a class="button" href="?group={{ selected_group }}&q={{ search|urlencode }}&review_status={{ review_status }}">Review groups</a>
+  <a class="button" href="?group={{ selected_group }}">Review groups</a>
   <a class="button" href="?group={{ selected_group }}&mode=preview">Preview pending decisions ({{ summary.pending_drafts }})</a>
   {% if can_manage %}<a class="button" href="{% url 'admin:imports_externaldatafile_download_product_memory' source.pk %}">Download memory Excel</a>{% endif %}
   {% if can_edit and not blocked %}
@@ -139,17 +110,19 @@
   {% if apply_plan.blockers %}<div class="workspace-warning"><strong>Apply blocked.</strong><ul>{% for blocker in apply_plan.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul></div>{% endif %}
   <div class="workspace-table-wrap">
     <table class="workspace-preview-table">
-      <thead><tr><th>SKU / action</th><th>Draft authorities</th><th>Current → Proposed (changed fields only)</th><th>Protection</th></tr></thead>
+      <thead><tr><th>SKU / action</th><th>Draft authorities</th><th>Proposed name</th><th>Proposed dimensions</th><th>Proposed weight / cubic</th><th>C/P / protection</th></tr></thead>
       <tbody>
       {% for item in preview_rows %}
         <tr>
           <td><strong>{{ item.row.sku }}</strong><br><span class="workspace-badge">{{ item.row_action }}</span><br><small>{{ item.row.status }}</small></td>
           <td>{{ item.decision.field_decisions }}</td>
-          <td>{% for change in item.changed_values %}<strong>{{ change.label }}</strong>: {{ change.current|default_if_none:"—" }} → <strong>{{ change.proposed|default_if_none:"—" }}</strong><br>{% empty %}<small>No operational field changes (retained value).</small>{% endfor %}</td>
-          <td>References: {{ item.reference_summary.total }}{% for blocker in item.blockers %}<br><strong>{{ blocker }}</strong>{% endfor %}</td>
+          <td>{{ item.proposed_values.name|default:"—" }}{% if item.proposed_values.description %}<br><small>{{ item.proposed_values.description }}</small>{% endif %}</td>
+          <td>{{ item.proposed_values.length_m|default:"—" }} × {{ item.proposed_values.width_m|default:"—" }} × {{ item.proposed_values.height_m|default:"—" }} m</td>
+          <td>{{ item.proposed_values.weight_kg|default:"—" }} kg · {{ item.proposed_values.cubic_m3|default:"—" }} m³</td>
+          <td>{{ item.proposed_values.freight_type|default:"Manual review required" }}<br><small>References: {{ item.reference_summary.total }}</small>{% for blocker in item.blockers %}<br><strong>{{ blocker }}</strong>{% endfor %}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="4">{% if summary.applied_decisions %}No pending drafts. {{ summary.applied_decisions }} decision{{ summary.applied_decisions|pluralize }} {% if summary.applied_decisions == 1 %}was{% else %}were{% endif %} already applied.{% else %}No pending drafts have been saved yet.{% endif %}</td></tr>
+        <tr><td colspan="6">{% if summary.applied_decisions %}No pending drafts. {{ summary.applied_decisions }} decision{{ summary.applied_decisions|pluralize }} {% if summary.applied_decisions == 1 %}was{% else %}were{% endif %} already applied.{% else %}No pending drafts have been saved yet.{% endif %}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -170,7 +143,7 @@
   <aside class="workspace-groups">
     <div class="workspace-panel-title"><h2>Review queue</h2></div>
     {% for item in group_navigation %}
-      <a class="workspace-group{% if selected_group == item.key %} selected{% endif %}" href="?group={{ item.key }}&q={{ search|urlencode }}&review_status={{ review_status }}">
+      <a class="workspace-group{% if selected_group == item.key %} selected{% endif %}" href="?group={{ item.key }}">
         <span>{{ item.label }}</span><span>{{ item.count }}</span>
         {% if item.key == 'SOURCE_ONLY' %}<small>Reference only by default</small>{% elif item.key == 'SOURCE_DIMENSIONS_ZERO' %}<small>Protect valid Calculator dimensions</small>{% elif item.key == 'DIMENSION_UNIT_REVIEW' %}<small>Raw Source value may be cm or scaled ×10/÷10</small>{% elif item.key == 'MEMORY_EXACT' %}<small>Exact approved history; reuse only on another pending file</small>{% elif item.key == 'MEMORY_SOURCE_CHANGED' %}<small>Compare before explicitly reusing the previous solution</small>{% elif item.key == 'MEMORY_NEW_ISSUE' %}<small>No approved previous solution exists for operational review</small>{% elif item.key == 'MEMORY_RULE_MATCH' %}<small>An active approved group rule can prepare a draft</small>{% elif item.key == 'FREIGHT_TYPE_REVIEW' %}<small>Select C or P manually</small>{% elif item.key == 'FREIGHT_TYPE_DIFFERENCES' %}<small>Transversal count: Source pallet rule differs from Calculator</small>{% elif item.key == 'OPERATIONAL_ONLY' %}<small>Removal checks kits and saved quotations</small>{% endif %}
       </a>
@@ -182,7 +155,6 @@
     <form method="get" class="workspace-filter">
       <input type="hidden" name="group" value="{{ selected_group }}">
       <label>Search SKU or name<input type="search" name="q" value="{{ search }}"></label>
-      <label>Review status<select name="review_status">{% for key, label in review_statuses %}<option value="{{ key }}"{% if review_status == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <button type="submit" class="button">Filter</button>
     </form>
 
@@ -229,7 +201,7 @@
           {% for row in page_obj %}
             <tr class="{% if row.decision %}workspace-draft{% else %}workspace-pending{% endif %}">
               <td><input type="checkbox" name="selected_skus" value="{{ row.sku }}" aria-label="Select {{ row.sku }}"></td>
-              <td><strong>{{ row.sku }}</strong><br><span class="workspace-status {{ row.review_state }}">{% if row.review_state == 'partial' %}🔴 Partially reviewed{% elif row.review_state == 'needs_review' %}🔴 Needs review{% elif row.review_state == 'draft' %}🟡 Draft{% elif row.review_state == 'applied' %}🟢 Applied{% else %}Reference{% endif %}</span>{% if row.latest_correction_round %}<br><small>Last Correction Round <a href="?mode=correction&round={{ row.latest_correction_round.pk }}">{{ row.latest_correction_round.pk }}</a> · {{ row.latest_correction_round.status }}</small>{% endif %}{% if row.pending_fields %}<br><small>Pending: {{ row.pending_fields|join:', ' }}</small>{% endif %}<br><small>{% if row.source_row_number %}Row {{ row.source_row_number }}{% else %}No source row{% endif %}</small><br><small>Source pallet: {{ row.source_values.pallet|default_if_none:"—" }} → {{ row.source_values.freight_type|default:"Review" }}</small><br><small>Calculator C/P: {{ row.operational_values.freight_type|default:"Not assigned" }}</small><br><a class="button workspace-edit-button" href="?group={{ selected_group }}&q={{ search|urlencode }}&review_status={{ review_status }}&edit={{ row.sku|urlencode }}#individual-editor">Edit product</a></td>
+              <td><strong>{{ row.sku }}</strong><br><small>{% if row.source_row_number %}Row {{ row.source_row_number }}{% else %}No source row{% endif %}</small><br><small>Source pallet: {{ row.source_values.pallet|default_if_none:"—" }} → {{ row.source_values.freight_type|default:"Review" }}</small><br><small>Calculator C/P: {{ row.operational_values.freight_type|default:"Not assigned" }}</small><br><a class="button workspace-edit-button" href="?group={{ selected_group }}&q={{ search|urlencode }}&edit={{ row.sku|urlencode }}#individual-editor">Edit product</a></td>
               <td><strong>{{ row.status }}</strong><br>{% for warning in row.warnings %}<span class="workspace-badge">{{ warning }}</span>{% empty %}—{% endfor %}{% if row.source %}<br><small>Raw dimensions: {{ row.source.length_mm|default_if_none:"—" }} × {{ row.source.width_mm|default_if_none:"—" }} × {{ row.source.height_mm|default_if_none:"—" }} mm</small>{% endif %}</td>
               <td><span class="workspace-label">Source</span><span class="workspace-source">{{ row.source_values.name|default:"—" }}</span>{% if row.source_values.description %}<br><small>{{ row.source_values.description }}</small>{% endif %}<div class="workspace-current"><span class="workspace-label">Calculator</span>{{ row.operational_values.name|default:"—" }}{% if row.operational_values.description %}<br><small>{{ row.operational_values.description }}</small>{% endif %}</div></td>
               <td><span class="workspace-label">Source</span>{{ row.source_values.length_m|default:"—" }} × {{ row.source_values.width_m|default:"—" }} × {{ row.source_values.height_m|default:"—" }} m<br>{{ row.source_values.weight_kg|default:"—" }} kg · {{ row.source_values.cubic_m3|default:"—" }} m³<div class="workspace-current"><span class="workspace-label">Calculator</span>{{ row.operational_values.length_m|default:"—" }} × {{ row.operational_values.width_m|default:"—" }} × {{ row.operational_values.height_m|default:"—" }} m<br>{{ row.operational_values.weight_kg|default:"—" }} kg · {{ row.operational_values.cubic_m3|default:"—" }} m³</div></td>
@@ -255,7 +227,7 @@
       <div class="workspace-table-wrap"><table class="workspace-table">
         <thead><tr><th>SKU</th><th>State / warnings</th><th>Source and Calculator</th><th>Decision</th></tr></thead>
         <tbody>{% for row in page_obj %}<tr>
-          <td><strong>{{ row.sku }}</strong><br><span class="workspace-status {{ row.review_state }}">{% if row.review_state == 'partial' %}🔴 Partially reviewed{% elif row.review_state == 'needs_review' %}🔴 Needs review{% elif row.review_state == 'draft' %}🟡 Draft{% elif row.review_state == 'applied' %}🟢 Applied{% else %}Reference{% endif %}</span>{% if row.latest_correction_round %}<br><small>Last Correction Round <a href="?mode=correction&round={{ row.latest_correction_round.pk }}">{{ row.latest_correction_round.pk }}</a> · {{ row.latest_correction_round.status }}</small>{% endif %}{% if row.pending_fields %}<br><small>Pending: {{ row.pending_fields|join:', ' }}</small>{% endif %}{% if progress.open_round and can_manage and row.status == 'DIFFERENT' %}<br><a href="?mode=correction&round={{ progress.open_round.pk }}&q={{ row.sku|urlencode }}">Review decisions</a>{% endif %}</td>
+          <td><strong>{{ row.sku }}</strong></td>
           <td>{{ row.status }}{% for warning in row.warnings %}<br><small>{{ warning }}</small>{% endfor %}</td>
           <td>Source: {{ row.source_values.name|default:"—" }}<br>Calculator: {{ row.operational_values.name|default:"—" }}</td>
           <td>{% if row.decision %}{{ row.decision.decision_status }} · {{ row.decision.row_action }}{% else %}Reference only{% endif %}</td>
@@ -265,9 +237,9 @@
 
     {% if page_obj.paginator.num_pages > 1 %}
     <p class="workspace-paginator">
-      {% if page_obj.has_previous %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&review_status={{ review_status }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+      {% if page_obj.has_previous %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
       Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-      {% if page_obj.has_next %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&review_status={{ review_status }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+      {% if page_obj.has_next %}<a href="?group={{ selected_group }}&q={{ search|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
     </p>
     {% endif %}
   </section>
@@ -294,7 +266,7 @@
     <div class="workspace-actions" style="padding:0 12px;">
       <label>Review note {{ individual_form.notes }}</label>
       <button type="submit" class="button default">Save individual draft</button>
-      <a class="button" href="?group={{ selected_group }}&q={{ search|urlencode }}&review_status={{ review_status }}">Close</a>
+      <a class="button" href="?group={{ selected_group }}&q={{ search|urlencode }}">Close</a>
     </div>
   </form>
 </section>

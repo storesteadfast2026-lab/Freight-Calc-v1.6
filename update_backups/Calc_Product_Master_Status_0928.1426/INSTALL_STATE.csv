@@ -1,0 +1,6 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/imports/admin_reconciliation.py","True","ee0565e1be71cdcb9bbcf12bea377c55f5a5476cf9664c47019dee0bad9289d6","25016e054333f3af5a49fad47b60eba4dfa22f6b1bf976f9200c244909fb22ba"
+"app/apps/imports/services/product_master.py","True","e6036ee59baee6a8bed5973c77033f0cc72a0204163b4214c5bb2895e691772d","2317b96725c8e6a35f1ec07182459b0d4dfc0ef23ab643be033059ba05ba723d"
+"app/apps/imports/services/product_reconciliation_apply.py","True","c6116cc371f35480db2850aa8aa90fd7ccfee79bfaf4ceae89ca9ec192a679e6","4b8dc5196320d3f2036314b1a56e89dd8b82c52ce6ce90fdac646d453830ccbd"
+"app/apps/imports/tests/test_product_master_reconciliation_bridge.py","True","de2b022c104a3f567df5a6ae344903d2ec8dea6b253e1e4ee7c15c1a3e127b1f","50e9e28ad8d879b70547f3e7476f45e93310a4ce81f11f4a5d0885bee7b084cf"
+"app/templates/admin/imports/product_master_comparison.html","False","","02bea593b39cfb54e086e85b691c3ba8f04720b1c462812f927281d181d978ee"

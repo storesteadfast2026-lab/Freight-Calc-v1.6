@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from decimal import Decimal
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.db import IntegrityError
 from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
@@ -24,17 +22,12 @@ from apps.imports.models import (
     ProductCorrectionRound,
     ProductReconciliationDecision,
     ProductReconciliationRule,
-    ProductCorrectionDecision,
-    ProductSourceRow,
 )
 from apps.imports.services.product_reconciliation import build_product_reconciliation
-from apps.imports.services.product_master import (
-    reconciliation_rows_for_customer, new_product_warnings,
-    import_new_products_from_master,
-)
+from apps.imports.services.product_master import reconciliation_rows_for_customer
 from apps.imports.services.xlsx_reader import SourceImportError
 from apps.clients.models import Client, Customer
-from django.http import Http404, HttpResponseNotAllowed, JsonResponse
+from django.http import Http404, HttpResponseNotAllowed
 from apps.imports.services.product_reconciliation_workspace import (
     ProductReconciliationWorkspaceError,
     apply_rule_as_draft,
@@ -70,7 +63,6 @@ from apps.imports.services.product_correction_rounds import (
     save_bulk_operational_dimensions,
     bulk_field_candidates, save_bulk_field_decisions,
     save_inline_correction_decisions, corrected_skus_for_source,
-    autosave_correction_field,
 )
 
 
@@ -104,23 +96,6 @@ CORRECTION_STATUSES = {
     'OPEN': 'Open (unreviewed and draft)', 'UNREVIEWED': 'Unreviewed',
     'DRAFT': 'Draft', 'CORRECTED': 'Already corrected', 'ALL': 'All',
 }
-
-RECONCILIATION_REVIEW_STATUSES = {
-    'NEEDS_REVIEW': 'Needs review',
-    'DRAFT': 'Draft',
-    'PARTIAL': 'Partially reviewed',
-    'APPLIED': 'Applied',
-    'ALL': 'All',
-}
-
-
-def rows_for_review_status(rows, status):
-    """Filter the displayed queue using the already computed per-SKU review state."""
-    if status == 'ALL':
-        return rows
-    if status == 'NEEDS_REVIEW':
-        return [row for row in rows if row['review_state'] in {'needs_review', 'partial'}]
-    return [row for row in rows if row['review_state'] == status.lower()]
 
 
 def filter_correction_rows(rows, *, group='ALL', status='OPEN', query='',
@@ -181,85 +156,6 @@ def correction_table_fields(row, form):
         else:
             hidden.extend([authority, *customs])
     return visible, hidden
-
-
-def reconciliation_progress(source, rows):
-    """Summarise existing decisions without confusing physical differences with open work."""
-    initial = {decision.product_code_normalized: decision for decision in
-               ProductReconciliationDecision.objects.filter(external_file=source)}
-    rounds = list(ProductCorrectionRound.objects.filter(
-        external_file=source, status__in=['DRAFT', 'APPLIED'],
-    ).prefetch_related('decisions').order_by('pk'))
-    current = next((item for item in reversed(rounds) if item.status == 'DRAFT'), None)
-    history = {}
-    for item in rounds:
-        for decision in item.decisions.all():
-            history.setdefault(decision.sku, []).append((item, decision))
-    counts = {'needs_review': 0, 'draft': 0, 'applied': 0, 'partial': 0,
-              'physical': 0, 'draft_decisions': 0}
-    counts['draft_decisions'] = (
-        current.decisions.count() if current else 0
-    ) + sum(d.decision_status in {'DRAFT', 'READY'} for d in initial.values())
-    for row in rows:
-        sku = row['sku']
-        differing = set(row.get('changed_fields') or ())
-        if row['status'] == 'DIFFERENT' and differing & {'dimensions', 'weight', 'cubic'}:
-            counts['physical'] += 1
-        original = initial.get(sku)
-        related = history.get(sku, [])
-        applied_fields = set()
-        draft_fields = set()
-        if original:
-            target = applied_fields if original.decision_status == 'APPLIED' else draft_fields
-            target.update(field for field, choice in original.field_decisions.items()
-                          if choice in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-        for item, decision in related:
-            target = applied_fields if item.status == 'APPLIED' else draft_fields
-            target.update(field for field, choice in decision.field_decisions.items()
-                          if choice in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-        reviewed = applied_fields | draft_fields
-        if row['status'] in {'DIFFERENT', 'OPERATIONAL_ONLY', 'DUPLICATE_SOURCE'}:
-            if differing and reviewed & differing and differing - reviewed:
-                state = 'partial'
-            elif (differing and differing - reviewed) or (not differing and not original and not related):
-                state = 'needs_review'
-            elif (original and original.decision_status != 'APPLIED') or any(
-                item.status == 'DRAFT' for item, _ in related
-            ):
-                state = 'draft'
-            else:
-                state = 'applied'
-            counts[state] += 1
-        elif original and original.decision_status == 'APPLIED' or any(
-            item.status == 'APPLIED' for item, _ in related
-        ):
-            state = 'applied'
-            counts['applied'] += 1
-        else:
-            state = 'reference'
-        row['review_state'] = state
-        row['latest_correction_round'] = related[-1][0] if related else None
-        row['pending_fields'] = sorted(differing - reviewed)
-    counts['products_needing_review'] = counts['needs_review'] + counts['partial']
-    counts['open_round'] = current
-    return counts
-
-
-def preview_changed_values(items):
-    """Show only actual changes in both existing Preview flows."""
-    labels = {'length_m': 'Length (m)', 'width_m': 'Width (m)', 'height_m': 'Height (m)',
-              'weight_kg': 'Weight (kg)', 'cubic_m3': 'Cubic (m³)',
-              'freight_type': 'Case/Pallet', 'name': 'Name', 'description': 'Description'}
-    for item in items:
-        current = item['row'].get('operational_values') or {}
-        proposed = item.get('proposed_values') or {}
-        item['changed_values'] = [
-            {'label': labels.get(key, key), 'current': current.get(key), 'proposed': value}
-            for key, value in proposed.items()
-            if str(current.get(key) if current.get(key) is not None else '')
-               != str(value if value is not None else '')
-        ]
-    return items
 
 
 class ReadOnlyReconciliationWorkflow(ABC):
@@ -338,169 +234,25 @@ class ReadOnlyReconciliationWorkflow(ABC):
 
 
 class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
-    """Show master status within one authorised Client and bridge approved imports."""
+    """Use the existing comparison view for one authorised Client, without staging."""
 
-    template_name = 'admin/imports/product_master_comparison.html'
     page_title = 'Product Master reconciliation comparison'
-    page_description = 'Review this Calculator Customer’s Product Master rows.'
-
-    def _selection(self, token, master, client):
-        try:
-            payload = signing.loads(token, salt='product-master-import', max_age=3600)
-        except signing.BadSignature as exc:
-            raise PermissionDenied('Import selection expired or changed.') from exc
-        if (payload.get('master') != master.pk or payload.get('client') != client.pk
-                or payload.get('sha') != master.sha256):
-            raise PermissionDenied('Import selection does not belong to this Customer.')
-        selected = payload.get('skus')
-        if not isinstance(selected, list) or len(selected) != len(set(selected)):
-            raise PermissionDenied('Invalid import selection.')
-        return selected
+    page_description = 'Read-only comparison; decisions, memory and Products remain unchanged.'
 
     def __call__(self, request, object_id, client_id):
         if not self.has_permission(request):
             raise PermissionDenied
-        self.client_id = client_id
-        # Resolve scope before accepting POST selections or reading the global workbook.
-        source = self.get_source(request, object_id)
-        master = source.master
-        customer = source.customer
-        rows, summary = self.build_reconciliation(source)
-        summary['physical_differences'] = sum(
-            row['status'] == 'DIFFERENT' and bool(
-                set(row['changed_fields']) & {'dimensions', 'weight', 'cubic'})
-            for row in rows
-        )
-        invalid_skus = {item['product_code_normalized'] for item in source.invalid_rows}
-        eligible = {}
-        for row in rows:
-            row['import_warnings'] = (
-                new_product_warnings(row, source.client) if row['status'] == 'SOURCE_ONLY' else []
-            )
-            if row['sku'] in invalid_skus:
-                row['import_warnings'].append('Another Source row with this SKU is invalid.')
-            if row['status'] == 'SOURCE_ONLY' and not row['import_warnings']:
-                eligible[row['sku']] = row
-        self._decorate_master_history(rows, source.client)
-        self._master_rows = (rows, summary)
-        action = request.POST.get('action') if request.method == 'POST' else None
-        if request.method == 'POST' and action not in {'review', 'import'}:
-            return HttpResponseNotAllowed(['GET', 'POST'])
-        if action in {'review', 'import'} and not (
-            request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation')
-        ):
-            raise PermissionDenied
-        if action == 'review':
-            requested = request.POST.getlist('skus')
-            if request.POST.get('select_all') == '1':
-                requested = list(eligible)
-            if not requested or len(set(requested)) != len(requested) or set(requested) - eligible.keys():
-                messages.error(request, 'Select eligible Source-only Products and review again.')
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            token = signing.dumps({'master': master.pk, 'client': source.client_id,
-                                   'sha': master.sha256, 'skus': requested},
-                                  salt='product-master-import', compress=True)
-            return redirect(request.path + '?' + urlencode({'preview': token}))
-        if action == 'import':
-            selected = self._selection(request.POST.get('token', ''), master, source.client)
-            if set(selected) - eligible.keys() or not selected:
-                messages.error(request, 'Source or operational Products changed. Review the selection again.')
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            try:
-                external_file, batch = import_new_products_from_master(
-                    master, customer, selected, actor=request.user, request=request,
-                )
-            except (SourceImportError, ProductReconciliationWorkspaceError,
-                    ProductReconciliationApplyBlocked, IntegrityError) as exc:
-                messages.error(request, 'A Product was created concurrently. Review again.'
-                               if isinstance(exc, IntegrityError) else str(exc))
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            messages.success(request, f'{len(batch["changes"])} new Products imported. '
-                             f'Reconciliation source #{external_file.pk} retains Apply and rollback history.')
-            return redirect(request.path + '?status=SOURCE_ONLY')
         if request.method != 'GET':
-            return HttpResponseNotAllowed(['GET', 'POST'])
+            return HttpResponseNotAllowed(['GET'])
+        self.client_id = client_id
         response = super().__call__(request, object_id)
         response.context_data['back_url'] = reverse(
             'admin:imports_productmaster_change', args=[object_id],
         ) if is_django_administrator(request.user) else reverse('admin:index')
         response.context_data['back_label'] = 'Product Masters'
-        response.context_data['product_master'] = True
-        response.context_data['eligible_count'] = len(eligible)
-        response.context_data['invalid_rows'] = source.invalid_rows
-        token = request.GET.get('preview')
-        if token:
-            selected = self._selection(token, master, source.client)
-            preview = [eligible[sku] for sku in selected if sku in eligible]
-            response.context_data.update({'preview_token': token, 'preview_rows': preview,
-                                          'preview_invalid': len(selected) - len(preview)})
         return response
 
-    @staticmethod
-    def _decorate_master_history(rows, client):
-        def same_source(left, right):
-            for key in ('name', 'description', 'category', 'comment', 'source_status'):
-                if getattr(left, key) != getattr(right, key):
-                    return False
-            for key in ('length_mm', 'width_mm', 'height_mm', 'weight_kg',
-                        'cubic_m3', 'quantity', 'pallet'):
-                a, b = getattr(left, key), getattr(right, key)
-                if (a is None) != (b is None) or (a is not None and Decimal(a) != Decimal(b)):
-                    return False
-            return True
-
-        different = {row['sku']: row for row in rows if row['status'] == 'DIFFERENT'}
-        staged = {}
-        for source_row in ProductSourceRow.objects.filter(
-            external_file__client=client, external_file__file_type='PRODUCTS',
-            external_file__status='VALIDATED', product_code_normalized__in=different,
-        ).select_related('external_file').order_by('external_file__uploaded_at', 'pk'):
-            staged.setdefault(source_row.product_code_normalized, []).append(source_row)
-        original = {}
-        for decision in ProductReconciliationDecision.objects.filter(
-            external_file__client=client, product_code_normalized__in=different,
-        ).select_related('external_file').order_by('reviewed_at', 'pk'):
-            original[(decision.product_code_normalized, decision.external_file_id)] = decision
-        corrections = {}
-        for decision in ProductCorrectionDecision.objects.filter(
-            round__external_file__client=client, sku__in=different,
-            round__status__in=('DRAFT', 'APPLIED'),
-        ).select_related('round__external_file').order_by('reviewed_at', 'pk'):
-            corrections[(decision.sku, decision.round.external_file_id)] = decision
-        for sku, row in different.items():
-            source_row = next((candidate for candidate in reversed(staged.get(sku, []))
-                if same_source(candidate, row['source'])), None)
-            matching_snapshot = source_row is not None
-            key = (sku, source_row.external_file_id) if source_row else None
-            decision = original.get(key)
-            correction = corrections.get(key)
-            applied = set()
-            draft = set()
-            if decision:
-                target = applied if decision.decision_status == 'APPLIED' else draft
-                target.update(k for k, v in decision.field_decisions.items()
-                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-            if correction:
-                target = applied if correction.round.status == 'APPLIED' else draft
-                target.update(k for k, v in correction.field_decisions.items()
-                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-            missing = set(row['changed_fields']) - applied - draft
-            row['review_state'] = ('partial' if missing and (applied or draft) else
-                                   'needs_review' if missing else
-                                   'draft' if draft else 'applied' if applied else 'needs_review')
-            row['latest_correction_round'] = correction.round if correction else None
-            row['latest_decision'] = correction or decision
-            source = (correction.round.external_file if correction else
-                      decision.external_file if decision else
-                      source_row.external_file if matching_snapshot else None)
-            row['reconciliation_url'] = (
-                reverse('admin:imports_externaldatafile_product_reconciliation', args=[source.pk])
-                + '?' + urlencode({'q': sku}) if source else None
-            )
-
     def get_source(self, request, object_id):
-        if getattr(self, '_cached_master_object_id', None) == object_id:
-            return self._cached_master_source
         if request.user.is_superuser:
             clients = Client.objects.all()
         else:
@@ -512,7 +264,7 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         customer = get_object_or_404(Customer, linked_client=client, is_special=False)
         master = get_object_or_404(ProductMaster, pk=object_id, status='VALIDATED')
         try:
-            rows, invalid = reconciliation_rows_for_customer(master, customer, include_invalid=True)
+            rows = reconciliation_rows_for_customer(master, customer)
         except SourceImportError as exc:
             # Do not disclose data or validation details from other Customers.
             raise Http404('This Product Master cannot be compared for this Customer.') from exc
@@ -521,16 +273,9 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
             original_filename=master.original_filename,
         )
         source.master_rows = rows
-        source.invalid_rows = invalid
-        source.master = master
-        source.customer = customer
-        self._cached_master_object_id = object_id
-        self._cached_master_source = source
         return source
 
     def build_reconciliation(self, source):
-        if hasattr(self, '_master_rows'):
-            return self._master_rows
         return build_workspace(
             source, source_rows=source.master_rows, pending_rejected=0,
             include_decisions=False,
@@ -580,25 +325,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
         bulk_preview = None
         try:
             if request.method == 'POST':
-                if action == 'autosave_field':
-                    if not round_obj:
-                        return JsonResponse({'error': 'Select an open correction round.'}, status=400)
-                    try:
-                        decision = autosave_correction_field(
-                            round_obj.pk, sku=str(request.POST.get('sku') or '').strip(),
-                            field=request.POST.get('field'), authority=request.POST.get('authority'),
-                            notes=request.POST.get('notes'),
-                            confirm_source_dimensions=request.POST.get('confirm_source_dimensions') == 'yes',
-                            allow_reopen=request.POST.get('allow_reopen') == 'yes',
-                            actor=request.user, request=request,
-                        )
-                    except CorrectionRoundError as exc:
-                        return JsonResponse({'error': str(exc)}, status=400)
-                    updated_rows, _ = build_workspace(source)
-                    updated_progress = reconciliation_progress(source, updated_rows)
-                    return JsonResponse({'status': 'saved', 'sku': decision.sku,
-                                         'draft_count': updated_progress['draft_decisions'],
-                                         'pending_count': updated_progress['products_needing_review']})
                 if action == 'start':
                     round_obj = start_correction_round(source.pk, actor=request.user, request=request)
                     return redirect(f'{base_url}&round={round_obj.pk}')
@@ -745,7 +471,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                         raise CorrectionRoundError('Confirm that you reviewed the correction Preview.')
                     apply_correction_round(round_obj.pk, actor=request.user, request=request)
                     messages.success(request, 'Correction round applied. Prior decisions remain in history.')
-                    return redirect(f'{request.path}?group=ALL_DIFFERENCES')
+                    return redirect(f'{base_url}&round={round_obj.pk}')
                 if action == 'rollback':
                     if request.POST.get('confirm_rollback') != 'yes':
                         raise CorrectionRoundError('Confirm correction round rollback.')
@@ -853,9 +579,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                         'reason': prior_decision.notes, 'date': prior.applied_at,
                     })
         plan = correction_preview(round_obj) if round_obj else None
-        if plan:
-            preview_changed_values(plan['items'])
-        progress = reconciliation_progress(source, rows)
         return TemplateResponse(request, 'admin/imports/product_correction_round.html', {
             **self.admin_site.each_context(request), 'title': 'Product correction rounds',
             'source': source, 'opts': ExternalDataFile._meta,
@@ -873,7 +596,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
             'correction_groups': CORRECTION_GROUPS.items(),
             'correction_statuses': CORRECTION_STATUSES.items(),
             'result_count': len(relevant),
-            'progress': progress,
         })
 
     @staticmethod
@@ -1062,7 +784,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                     request,
                     f'{len(batch["changes"])} Product change(s) applied successfully.',
                 )
-                return redirect(f'{request.path}?group=ALL_DIFFERENCES')
+                return redirect(f'{request.path}?group=ALL_DIFFERENCES&mode=preview')
 
             if action == 'rollback_apply':
                 if request.POST.get('confirm_rollback') != 'yes':
@@ -1169,7 +891,6 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                     'prepared automatically as drafts.',
                 )
         rows, summary = build_workspace(source)
-        progress = reconciliation_progress(source, rows)
         blocked = summary['pending_rejected'] > 0
         legacy_status = str(request.GET.get('status') or '').upper()
         legacy_group = {
@@ -1203,10 +924,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
                 return response
 
         search = str(request.GET.get('q') or '').strip()
-        review_status = str(request.GET.get('review_status') or 'ALL').upper()
-        if review_status not in RECONCILIATION_REVIEW_STATUSES:
-            review_status = 'ALL'
-        filtered = rows_for_review_status(self._search_rows(group_rows, search), review_status)
+        filtered = self._search_rows(group_rows, search)
         filtered.sort(key=lambda row: (row['sku'], row['source_row_number'] or 0))
         page = Paginator(filtered, self.page_size).get_page(request.GET.get('page'))
         bulk_form = ProductReconciliationBulkForm(
@@ -1225,7 +943,7 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
         preview_rows = []
         preview_mode = str(request.GET.get('mode') or '').lower() == 'preview'
         if preview_mode:
-            preview_rows = preview_changed_values(apply_plan['items'])
+            preview_rows = apply_plan['items']
 
         rules = ProductReconciliationRule.objects.filter(
             client=source.client,
@@ -1261,11 +979,8 @@ class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
             'page_description': self.page_description,
             'source': source,
             'summary': summary,
-            'progress': progress,
             'page_obj': page,
             'search': search,
-            'review_status': review_status,
-            'review_statuses': RECONCILIATION_REVIEW_STATUSES.items(),
             'result_count': len(filtered),
             'group_result_count': len(group_rows),
             'blocked': blocked,

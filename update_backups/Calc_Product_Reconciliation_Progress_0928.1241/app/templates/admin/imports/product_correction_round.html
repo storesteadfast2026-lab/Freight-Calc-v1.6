@@ -2,9 +2,6 @@
 {% block content %}
 <p><a href="{{ back_url }}">Back to Product reconciliation</a> · {{ source.original_filename }} (ID {{ source.pk }})</p>
 <p>Review Product differences against the immutable Source. Draft decisions do not change Products; Apply is explicit and every applied round retains its audit and rollback history.</p>
-<p><strong>Source → Reconciliation → Review → Draft → Preview → Apply → Complete</strong> · Current stage: <strong>{% if preview_mode %}Preview{% elif round.status == 'APPLIED' %}Complete{% else %}Review / Draft{% endif %}</strong></p>
-<p><strong id="correction-progress">{{ progress.draft_decisions }} draft decisions · {{ progress.products_needing_review }} products still need review</strong> · <a href="{{ back_url }}">Overall reconciliation status</a></p>
-{% if round.status == 'DRAFT' %}<p><a class="button default" href="?mode=correction&round={{ round.pk }}&preview=1">Preview {{ plan.decision_count }} corrections →</a> {% if progress.products_needing_review %}<a class="button" href="?mode=correction&round={{ round.pk }}">Continue reviewing</a>{% endif %}</p>{% endif %}
 {% if not round or round.status != 'DRAFT' %}
 <form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="start"><button type="submit" class="button default">Start correction round</button></form>
 {% endif %}
@@ -74,15 +71,15 @@
 {% endif %}
 <form method="post" id="correction-rows">{% csrf_token %}<input type="hidden" name="correction_action" value="save_inline"><input type="hidden" name="round_id" value="{{ round.pk }}"><input type="hidden" name="group" value="{{ selected_group }}"><input type="hidden" name="status" value="{{ selected_status }}"><input type="hidden" name="q" value="{{ query }}">
 <h3>Review differences on this page</h3>
-<p>Use Source and Keep Calculator save immediately to this Draft, one field at a time. Custom values, clearing decisions and selected bulk actions use the existing explicit Save. Source dimensions with unit warnings still require confirmation. Already corrected SKUs require individual confirmation.</p>
+<p>Select rows to save their inline choices together, or use the bulk action to change only one field across the filtered results. Already corrected SKUs require explicit individual confirmation and are excluded from bulk actions.</p>
 <label><input type="checkbox" id="select-visible" onclick="document.querySelectorAll('#correction-rows input[name=selected_skus]').forEach(function(box){box.checked=this.checked}.bind(this))"> Select all visible</label>
 <table><thead><tr><th>Select</th><th>SKU / status</th><th>Different field(s)</th><th>Source</th><th>Current Calculator</th><th>Choose / custom value</th><th>Draft action</th></tr></thead><tbody>
-{% for item in table_rows %}<tr data-correction-sku="{{ item.row.sku }}">
+{% for item in table_rows %}<tr>
 <td><input type="checkbox" name="selected_skus" value="{{ item.row.sku }}" aria-label="Select {{ item.row.sku }}"></td>
 <td><strong>{{ item.row.sku }}</strong><br>{% if item.corrected %}<strong>Already corrected in an applied round</strong>{% elif item.decision %}Draft saved{% else %}Unreviewed{% endif %}{% if item.corrected %}<br><label><input type="checkbox" name="confirmed_reopen_skus" value="{{ item.row.sku }}"> Confirm individual re-review</label>{% endif %}<br><small>{{ item.row.source_values.name }}</small></td>
 <td>{% if item.multiple %}<details><summary>{{ item.fields|length }} different fields · expand</summary><table><thead><tr><th>Field</th><th>Source</th><th>Current Calculator</th><th>Choose / custom</th></tr></thead><tbody>{% for field in item.fields %}<tr><td>{{ field.label }}</td><td>{{ field.source }}</td><td>{{ field.current }}</td><td>{{ field.authority }}{% for custom in field.customs %} {{ custom }}{% endfor %}</td></tr>{% endfor %}</tbody></table></details>{% else %}{% with field=item.fields.0 %}{{ field.label }}{% endwith %}{% endif %}{% for warning in item.row.warnings %}<br><small>{{ warning }}</small>{% endfor %}</td>
 {% if item.multiple %}<td colspan="3">Expand the fields to compare Source and Calculator values and choose each decision.</td>{% else %}{% with field=item.fields.0 %}<td>{{ field.source }}</td><td>{{ field.current }}</td><td>{{ field.authority }}{% for custom in field.customs %} {{ custom }}{% endfor %}</td>{% endwith %}{% endif %}
-<td>{{ item.form.sku }}{% for hidden in item.hidden_fields %}{{ hidden.as_hidden }}{% endfor %}<label>Individual reason {{ item.form.notes }}</label>{% if 'dimensions' in item.row.changed_fields %}<br><label><input type="checkbox" name="confirmed_source_skus" value="{{ item.row.sku }}"> Verified Source dimensions and units</label>{% endif %}<br><small class="autosave-state" role="status" aria-live="polite">{% if item.decision %}Saved ✓ / Draft{% else %}Awaiting review{% endif %}</small><br><button type="submit" class="button" name="inline_sku" value="{{ item.row.sku }}">Save this SKU</button><br><a href="?mode=correction&round={{ round.pk }}&group={{ selected_group }}&status={{ selected_status }}&edit={{ item.row.sku|urlencode }}#correction-editor">Review {{ item.row.sku }}</a></td>
+<td>{{ item.form.sku }}{% for hidden in item.hidden_fields %}{{ hidden.as_hidden }}{% endfor %}<label>Individual reason {{ item.form.notes }}</label>{% if 'dimensions' in item.row.changed_fields %}<br><label><input type="checkbox" name="confirmed_source_skus" value="{{ item.row.sku }}"> Verified Source dimensions and units</label>{% endif %}<br><button type="submit" class="button" name="inline_sku" value="{{ item.row.sku }}">Save this SKU</button><br><a href="?mode=correction&round={{ round.pk }}&group={{ selected_group }}&status={{ selected_status }}&edit={{ item.row.sku|urlencode }}#correction-editor">Review {{ item.row.sku }}</a></td>
 </tr>{% empty %}<tr><td colspan="7">No matching differences.</td></tr>{% endfor %}</tbody></table>
 <label>Bulk reason (used when a selected row has no individual reason) <textarea name="bulk_reason" rows="2"></textarea></label><br>
 <button type="submit" class="button" name="correction_action" value="save_selected_inline">Save selected inline decisions as draft</button>
@@ -92,53 +89,6 @@
 <label><input type="checkbox" name="select_all_filtered" value="yes"> Select all eligible in filtered results (across pages)</label>
 <button type="submit" class="button" name="correction_action" value="preview_bulk_field">Preview included and excluded SKUs</button>
 </fieldset></form>
-<script>
-(function () {
-  const form = document.getElementById('correction-rows');
-  if (!form) return;
-  form.querySelectorAll('select[name$="_authority"]').forEach(function (select) {
-    select.dataset.savedAuthority = select.value;
-  });
-  form.addEventListener('change', async function (event) {
-    const select = event.target;
-    const match = select.name && select.name.match(/^r\d+-(name|description|dimensions|weight|cubic|freight_type)_authority$/);
-    if (!match || !['SOURCE', 'OPERATIONAL'].includes(select.value)) return;
-    const row = select.closest('tr[data-correction-sku]');
-    if (!row) return;
-    const state = row.querySelector('.autosave-state');
-    const sku = row.dataset.correctionSku;
-    const previous = select.dataset.savedAuthority || 'NO_CHANGE';
-    const prefix = select.name.split('-')[0];
-    const payload = new FormData();
-    payload.set('csrfmiddlewaretoken', form.querySelector('[name=csrfmiddlewaretoken]').value);
-    payload.set('correction_action', 'autosave_field');
-    payload.set('round_id', '{{ round.pk }}');
-    payload.set('sku', sku);
-    payload.set('field', match[1]);
-    payload.set('authority', select.value);
-    payload.set('notes', row.querySelector('[name="' + prefix + '-notes"]')?.value || '');
-    if (row.querySelector('[name=confirmed_source_skus]')?.checked) payload.set('confirm_source_dimensions', 'yes');
-    if (row.querySelector('[name=confirmed_reopen_skus]')?.checked) payload.set('allow_reopen', 'yes');
-    select.disabled = true;
-    state.textContent = 'Saving draft…';
-    try {
-      const response = await fetch('?mode=correction&round={{ round.pk }}', {
-        method: 'POST', body: payload, credentials: 'same-origin',
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Draft could not be saved.');
-      select.dataset.savedAuthority = select.value;
-      state.textContent = 'Saved ✓ / Draft';
-      const progress = document.getElementById('correction-progress');
-      if (progress) progress.textContent = result.draft_count + ' draft decisions · ' + result.pending_count + ' products still need review';
-    } catch (error) {
-      select.value = previous;
-      state.textContent = error.message;
-    } finally { select.disabled = false; }
-  });
-}());
-</script>
 {% if page_obj.has_previous %}<a href="?mode=correction&round={{ round.pk }}&group={{ selected_group }}&status={{ selected_status }}&q={{ query|urlencode }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
 Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
 {% if page_obj.has_next %}<a href="?mode=correction&round={{ round.pk }}&group={{ selected_group }}&status={{ selected_status }}&q={{ query|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
@@ -148,7 +98,7 @@ Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
 <h3>{% if round.status == 'DRAFT' %}Preview correction{% else %}Applied decision history{% endif %}</h3>
 {% if plan.blockers %}<p><strong>Apply blocked:</strong></p><ul>{% for blocker in plan.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>{% endif %}
 <table><thead><tr><th>SKU</th><th>Authorities / reason</th><th>Current → proposed values</th><th>Issues</th></tr></thead><tbody>
-{% for item in plan.items %}<tr><td>{{ item.row.sku }}</td><td>{{ item.decision.field_decisions }}<br>{{ item.decision.notes }}</td><td>{% for change in item.changed_values %}<strong>{{ change.label }}</strong>: {{ change.current|default_if_none:"—" }} → <strong>{{ change.proposed|default_if_none:"—" }}</strong><br>{% empty %}Retained Calculator value; no operational field changes.{% endfor %}</td><td>{% for blocker in item.blockers %}{{ blocker }}<br>{% endfor %}</td></tr>{% empty %}<tr><td colspan="4">No decisions saved for this round.</td></tr>{% endfor %}
+{% for item in plan.items %}<tr><td>{{ item.row.sku }}</td><td>{{ item.decision.field_decisions }}<br>{{ item.decision.notes }}</td><td>{{ item.row.operational_values }}<br>→ {{ item.proposed_values }}</td><td>{% for blocker in item.blockers %}{{ blocker }}<br>{% endfor %}</td></tr>{% empty %}<tr><td colspan="4">No decisions saved for this round.</td></tr>{% endfor %}
 </tbody></table>
 {% if round.status == 'DRAFT' and plan.decision_count %}<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="apply"><input type="hidden" name="round_id" value="{{ round.pk }}"><label><input type="checkbox" name="confirm_apply" value="yes"> I reviewed every proposed change</label><button type="submit" class="button default"{% if not plan.can_apply %} disabled{% endif %}>Apply {{ plan.decision_count }} correction(s)</button></form>{% endif %}
 {% if round.status == 'APPLIED' %}<form method="post">{% csrf_token %}<input type="hidden" name="correction_action" value="rollback"><input type="hidden" name="round_id" value="{{ round.pk }}"><label><input type="checkbox" name="confirm_rollback" value="yes"> Confirm rollback of this correction round</label><button type="submit" class="button">Rollback correction round</button></form>{% endif %}

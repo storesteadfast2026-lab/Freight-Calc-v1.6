@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from decimal import Decimal
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.db import IntegrityError
 from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
@@ -24,14 +22,9 @@ from apps.imports.models import (
     ProductCorrectionRound,
     ProductReconciliationDecision,
     ProductReconciliationRule,
-    ProductCorrectionDecision,
-    ProductSourceRow,
 )
 from apps.imports.services.product_reconciliation import build_product_reconciliation
-from apps.imports.services.product_master import (
-    reconciliation_rows_for_customer, new_product_warnings,
-    import_new_products_from_master,
-)
+from apps.imports.services.product_master import reconciliation_rows_for_customer
 from apps.imports.services.xlsx_reader import SourceImportError
 from apps.clients.models import Client, Customer
 from django.http import Http404, HttpResponseNotAllowed, JsonResponse
@@ -338,169 +331,25 @@ class ReadOnlyReconciliationWorkflow(ABC):
 
 
 class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
-    """Show master status within one authorised Client and bridge approved imports."""
+    """Use the existing comparison view for one authorised Client, without staging."""
 
-    template_name = 'admin/imports/product_master_comparison.html'
     page_title = 'Product Master reconciliation comparison'
-    page_description = 'Review this Calculator Customer’s Product Master rows.'
-
-    def _selection(self, token, master, client):
-        try:
-            payload = signing.loads(token, salt='product-master-import', max_age=3600)
-        except signing.BadSignature as exc:
-            raise PermissionDenied('Import selection expired or changed.') from exc
-        if (payload.get('master') != master.pk or payload.get('client') != client.pk
-                or payload.get('sha') != master.sha256):
-            raise PermissionDenied('Import selection does not belong to this Customer.')
-        selected = payload.get('skus')
-        if not isinstance(selected, list) or len(selected) != len(set(selected)):
-            raise PermissionDenied('Invalid import selection.')
-        return selected
+    page_description = 'Read-only comparison; decisions, memory and Products remain unchanged.'
 
     def __call__(self, request, object_id, client_id):
         if not self.has_permission(request):
             raise PermissionDenied
-        self.client_id = client_id
-        # Resolve scope before accepting POST selections or reading the global workbook.
-        source = self.get_source(request, object_id)
-        master = source.master
-        customer = source.customer
-        rows, summary = self.build_reconciliation(source)
-        summary['physical_differences'] = sum(
-            row['status'] == 'DIFFERENT' and bool(
-                set(row['changed_fields']) & {'dimensions', 'weight', 'cubic'})
-            for row in rows
-        )
-        invalid_skus = {item['product_code_normalized'] for item in source.invalid_rows}
-        eligible = {}
-        for row in rows:
-            row['import_warnings'] = (
-                new_product_warnings(row, source.client) if row['status'] == 'SOURCE_ONLY' else []
-            )
-            if row['sku'] in invalid_skus:
-                row['import_warnings'].append('Another Source row with this SKU is invalid.')
-            if row['status'] == 'SOURCE_ONLY' and not row['import_warnings']:
-                eligible[row['sku']] = row
-        self._decorate_master_history(rows, source.client)
-        self._master_rows = (rows, summary)
-        action = request.POST.get('action') if request.method == 'POST' else None
-        if request.method == 'POST' and action not in {'review', 'import'}:
-            return HttpResponseNotAllowed(['GET', 'POST'])
-        if action in {'review', 'import'} and not (
-            request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation')
-        ):
-            raise PermissionDenied
-        if action == 'review':
-            requested = request.POST.getlist('skus')
-            if request.POST.get('select_all') == '1':
-                requested = list(eligible)
-            if not requested or len(set(requested)) != len(requested) or set(requested) - eligible.keys():
-                messages.error(request, 'Select eligible Source-only Products and review again.')
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            token = signing.dumps({'master': master.pk, 'client': source.client_id,
-                                   'sha': master.sha256, 'skus': requested},
-                                  salt='product-master-import', compress=True)
-            return redirect(request.path + '?' + urlencode({'preview': token}))
-        if action == 'import':
-            selected = self._selection(request.POST.get('token', ''), master, source.client)
-            if set(selected) - eligible.keys() or not selected:
-                messages.error(request, 'Source or operational Products changed. Review the selection again.')
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            try:
-                external_file, batch = import_new_products_from_master(
-                    master, customer, selected, actor=request.user, request=request,
-                )
-            except (SourceImportError, ProductReconciliationWorkspaceError,
-                    ProductReconciliationApplyBlocked, IntegrityError) as exc:
-                messages.error(request, 'A Product was created concurrently. Review again.'
-                               if isinstance(exc, IntegrityError) else str(exc))
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            messages.success(request, f'{len(batch["changes"])} new Products imported. '
-                             f'Reconciliation source #{external_file.pk} retains Apply and rollback history.')
-            return redirect(request.path + '?status=SOURCE_ONLY')
         if request.method != 'GET':
-            return HttpResponseNotAllowed(['GET', 'POST'])
+            return HttpResponseNotAllowed(['GET'])
+        self.client_id = client_id
         response = super().__call__(request, object_id)
         response.context_data['back_url'] = reverse(
             'admin:imports_productmaster_change', args=[object_id],
         ) if is_django_administrator(request.user) else reverse('admin:index')
         response.context_data['back_label'] = 'Product Masters'
-        response.context_data['product_master'] = True
-        response.context_data['eligible_count'] = len(eligible)
-        response.context_data['invalid_rows'] = source.invalid_rows
-        token = request.GET.get('preview')
-        if token:
-            selected = self._selection(token, master, source.client)
-            preview = [eligible[sku] for sku in selected if sku in eligible]
-            response.context_data.update({'preview_token': token, 'preview_rows': preview,
-                                          'preview_invalid': len(selected) - len(preview)})
         return response
 
-    @staticmethod
-    def _decorate_master_history(rows, client):
-        def same_source(left, right):
-            for key in ('name', 'description', 'category', 'comment', 'source_status'):
-                if getattr(left, key) != getattr(right, key):
-                    return False
-            for key in ('length_mm', 'width_mm', 'height_mm', 'weight_kg',
-                        'cubic_m3', 'quantity', 'pallet'):
-                a, b = getattr(left, key), getattr(right, key)
-                if (a is None) != (b is None) or (a is not None and Decimal(a) != Decimal(b)):
-                    return False
-            return True
-
-        different = {row['sku']: row for row in rows if row['status'] == 'DIFFERENT'}
-        staged = {}
-        for source_row in ProductSourceRow.objects.filter(
-            external_file__client=client, external_file__file_type='PRODUCTS',
-            external_file__status='VALIDATED', product_code_normalized__in=different,
-        ).select_related('external_file').order_by('external_file__uploaded_at', 'pk'):
-            staged.setdefault(source_row.product_code_normalized, []).append(source_row)
-        original = {}
-        for decision in ProductReconciliationDecision.objects.filter(
-            external_file__client=client, product_code_normalized__in=different,
-        ).select_related('external_file').order_by('reviewed_at', 'pk'):
-            original[(decision.product_code_normalized, decision.external_file_id)] = decision
-        corrections = {}
-        for decision in ProductCorrectionDecision.objects.filter(
-            round__external_file__client=client, sku__in=different,
-            round__status__in=('DRAFT', 'APPLIED'),
-        ).select_related('round__external_file').order_by('reviewed_at', 'pk'):
-            corrections[(decision.sku, decision.round.external_file_id)] = decision
-        for sku, row in different.items():
-            source_row = next((candidate for candidate in reversed(staged.get(sku, []))
-                if same_source(candidate, row['source'])), None)
-            matching_snapshot = source_row is not None
-            key = (sku, source_row.external_file_id) if source_row else None
-            decision = original.get(key)
-            correction = corrections.get(key)
-            applied = set()
-            draft = set()
-            if decision:
-                target = applied if decision.decision_status == 'APPLIED' else draft
-                target.update(k for k, v in decision.field_decisions.items()
-                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-            if correction:
-                target = applied if correction.round.status == 'APPLIED' else draft
-                target.update(k for k, v in correction.field_decisions.items()
-                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
-            missing = set(row['changed_fields']) - applied - draft
-            row['review_state'] = ('partial' if missing and (applied or draft) else
-                                   'needs_review' if missing else
-                                   'draft' if draft else 'applied' if applied else 'needs_review')
-            row['latest_correction_round'] = correction.round if correction else None
-            row['latest_decision'] = correction or decision
-            source = (correction.round.external_file if correction else
-                      decision.external_file if decision else
-                      source_row.external_file if matching_snapshot else None)
-            row['reconciliation_url'] = (
-                reverse('admin:imports_externaldatafile_product_reconciliation', args=[source.pk])
-                + '?' + urlencode({'q': sku}) if source else None
-            )
-
     def get_source(self, request, object_id):
-        if getattr(self, '_cached_master_object_id', None) == object_id:
-            return self._cached_master_source
         if request.user.is_superuser:
             clients = Client.objects.all()
         else:
@@ -512,7 +361,7 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         customer = get_object_or_404(Customer, linked_client=client, is_special=False)
         master = get_object_or_404(ProductMaster, pk=object_id, status='VALIDATED')
         try:
-            rows, invalid = reconciliation_rows_for_customer(master, customer, include_invalid=True)
+            rows = reconciliation_rows_for_customer(master, customer)
         except SourceImportError as exc:
             # Do not disclose data or validation details from other Customers.
             raise Http404('This Product Master cannot be compared for this Customer.') from exc
@@ -521,16 +370,9 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
             original_filename=master.original_filename,
         )
         source.master_rows = rows
-        source.invalid_rows = invalid
-        source.master = master
-        source.customer = customer
-        self._cached_master_object_id = object_id
-        self._cached_master_source = source
         return source
 
     def build_reconciliation(self, source):
-        if hasattr(self, '_master_rows'):
-            return self._master_rows
         return build_workspace(
             source, source_rows=source.master_rows, pending_rejected=0,
             include_decisions=False,
