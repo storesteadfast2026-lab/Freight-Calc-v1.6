@@ -8,10 +8,8 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import Group
-from django.db import IntegrityError, connection
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings
-from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.authentication_gateway.models import CalculatorUserProfile
@@ -190,18 +188,8 @@ class ProductMasterReadOnlyBridgeTests(TestCase):
             self.assertFalse(Product.objects.filter(client=self.sth, sku='NEW').exists())
             self.assertFalse(ExternalDataFile.objects.exists())
             token = preview.context['preview_token']
-            with CaptureQueriesContext(connection) as captured:
-                apply = self.client.post(self.compare(self.sth), {
-                    'action': 'import', 'token': token, 'confirmed': '1',
-                })
+            apply = self.client.post(self.compare(self.sth), {'action': 'import', 'token': token, 'confirmed': '1'})
             self.assertEqual(apply.status_code, 302)
-            # PostgreSQL rejects FOR UPDATE against the nullable linked_client
-            # side of a LEFT OUTER JOIN. The Customer lock must select only Customer.
-            customer_locks = [query['sql'] for query in captured if
-                              'FROM "clients_customer"' in query['sql'] and
-                              '"clients_customer"."id" =' in query['sql']]
-            self.assertTrue(customer_locks)
-            self.assertTrue(all('JOIN' not in query for query in customer_locks))
             self.assertFalse([str(m) for m in __import__('django.contrib.messages', fromlist=['get_messages']).get_messages(apply.wsgi_request) if m.level >= 40])
             imported = Product.objects.get(client=self.sth, sku='NEW')
             self.assertTrue(imported.active)
@@ -363,97 +351,6 @@ class ProductMasterReadOnlyBridgeTests(TestCase):
             self.assertEqual(restored.context['summary']['source_only'], 73)
             self.assertEqual(restored.context['progress'],
                              {'initial': 123, 'imported': 50, 'remaining': 73})
-
-    def test_global_preview_all_pages_apply_once_and_recalculate(self):
-        self.client.force_login(self.superuser)
-        url = self.compare(self.sth)
-        with patch('apps.imports.services.product_master.read_product_file', side_effect=self.staged_workbook):
-            review = self.client.get(url + '?status=SOURCE_ONLY&page=3')
-            self.assertContains(review, 'Preview all eligible remaining (123)')
-            selected = self.client.post(url, {'action': 'review_all'})
-            preview = self.client.get(selected['Location'])
-            self.assertTrue(preview.context['preview_is_global'])
-            self.assertEqual(len(preview.context['preview_rows']), 123)
-            html = preview.content.decode()
-            self.assertIn('123 Products will be created', html)
-            self.assertIn('0 existing Products will be updated', html)
-            self.assertIn('0 Products will be deleted', html)
-            self.assertIn('0 Source-only excluded', html)
-            self.assertIn('Import all 123 eligible Products', html)
-            self.assertLess(html.index('Import all 123 eligible Products'),
-                            html.index('<table class="recon-table">'))
-            self.assertEqual(Product.objects.count(), 2)
-            token = preview.context['preview_token']
-            response = self.client.post(url, {'action': 'import', 'token': token, 'confirmed': '1'})
-            self.assertEqual(response.status_code, 302)
-            self.assertEqual(Product.objects.filter(client=self.sth).count(), 124)
-            self.assertEqual(Product.objects.filter(client=self.pon).count(), 1)
-            self.assertEqual(ExternalDataFile.objects.count(), 1)
-            source = ExternalDataFile.objects.get()
-            self.assertEqual(len(source.import_summary['product_reconciliation_apply_batches'][0]['changes']), 123)
-            updated = self.client.get(url + '?status=SOURCE_ONLY')
-            self.assertEqual(updated.context['summary']['operational_products'], 124)
-            self.assertEqual(updated.context['summary']['source_only'], 0)
-            self.assertEqual(updated.context['eligible_count'], 0)
-            self.assertEqual(updated.context['progress'],
-                             {'initial': 123, 'imported': 123, 'remaining': 0})
-            self.client.post(url, {'action': 'import', 'token': token, 'confirmed': '1'})
-            self.assertEqual(Product.objects.filter(client=self.sth).count(), 124)
-            self.assertEqual(ExternalDataFile.objects.count(), 1)
-            rollback_latest_product_apply(source.pk, actor=self.superuser)
-            self.assertEqual(Product.objects.filter(client=self.sth).count(), 1)
-            restored = self.client.get(url + '?status=SOURCE_ONLY')
-            self.assertEqual(restored.context['eligible_count'], 123)
-
-    def test_global_excludes_ineligible_source_only_and_preserves_existing(self):
-        self.client.force_login(self.superuser)
-        url = self.compare(self.sth)
-        with patch('apps.imports.services.product_master.read_product_file', side_effect=self.import_workbook):
-            selected = self.client.post(url, {'action': 'review_all'})
-            preview = self.client.get(selected['Location'])
-            self.assertEqual([row['sku'] for row in preview.context['preview_rows']], ['NEW'])
-            self.assertContains(preview, '1 Source-only excluded from import')
-            self.client.post(url, {'action': 'import', 'token': preview.context['preview_token'],
-                                   'confirmed': '1'})
-            updated = self.client.get(url + '?status=SOURCE_ONLY')
-            self.assertEqual(updated.context['summary']['source_only'], 1)
-            self.assertEqual(updated.context['eligible_count'], 0)
-            self.assertEqual(updated.context['summary']['operational_products'], 2)
-        self.assertFalse(Product.objects.filter(client=self.sth, sku='NO_PALLET').exists())
-        self.assertFalse(Product.objects.filter(client=self.sth, sku='INVALID').exists())
-        self.assertEqual(Product.objects.get(client=self.sth, sku='A1').name, 'Old STH')
-        self.assertFalse(Product.objects.filter(client=self.pon, sku='NEW').exists())
-
-    def test_global_selection_invalidated_by_concurrent_product(self):
-        self.client.force_login(self.superuser)
-        url = self.compare(self.sth)
-        with patch('apps.imports.services.product_master.read_product_file', side_effect=self.staged_workbook):
-            selected = self.client.post(url, {'action': 'review_all'})
-            token = self.client.get(selected['Location']).context['preview_token']
-            Product.objects.create(client=self.sth, sku='B000', name='Created elsewhere')
-            stale = self.client.get(selected['Location'])
-            self.assertContains(stale, 'Return to Review; Import is disabled')
-            self.assertNotContains(stale, 'Import all 122 eligible Products')
-            response = self.client.post(url, {'action': 'import', 'token': token, 'confirmed': '1'})
-            self.assertEqual(response.status_code, 302)
-            self.assertEqual(Product.objects.filter(client=self.sth).count(), 2)
-            self.assertFalse(ExternalDataFile.objects.exists())
-
-    def test_global_apply_rolls_back_entire_selection_on_failure(self):
-        self.client.force_login(self.superuser)
-        url = self.compare(self.sth)
-        with patch('apps.imports.services.product_master.read_product_file', side_effect=self.staged_workbook):
-            selected = self.client.post(url, {'action': 'review_all'})
-            token = self.client.get(selected['Location']).context['preview_token']
-            with patch('apps.imports.services.product_reconciliation_apply.remember_applied_product_decision',
-                       side_effect=IntegrityError('forced failure')):
-                response = self.client.post(url, {'action': 'import', 'token': token,
-                                                  'confirmed': '1'})
-            self.assertEqual(response.status_code, 302)
-            self.assertEqual(Product.objects.count(), 2)
-            self.assertEqual(ExternalDataFile.objects.count(), 0)
-            self.assertEqual(ProductSourceRow.objects.count(), 0)
-            self.assertEqual(ProductReconciliationDecision.objects.count(), 0)
 
     def test_duplicate_links_and_exclusion_messages_are_rendered_once(self):
         self.client.force_login(self.superuser)

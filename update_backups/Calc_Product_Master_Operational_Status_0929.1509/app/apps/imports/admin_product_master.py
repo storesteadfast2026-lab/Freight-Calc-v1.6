@@ -103,34 +103,11 @@ class ProductMasterAdmin(admin.ModelAdmin):
             ).select_related('linked_client').order_by('code')
             if master.status == 'VALIDATED' else []
         )
-        linked = list(linked)
-        operational_statuses = []
-        for customer in linked:
-            workflow = ProductMasterReadOnlyReconciliation(self.admin_site)
-            try:
-                comparison = workflow(request, master.pk, customer.linked_client_id)
-                totals = comparison.context_data['summary']
-                eligible = comparison.context_data['eligible_count']
-                status = {
-                    'source_rows': totals['source_rows'],
-                    'operational_products': totals['operational_products'],
-                    'same': totals['same'], 'different': totals['different'],
-                    'source_only': totals['source_only'],
-                    'operational_only': totals['operational_only'],
-                    'eligible_remaining': eligible,
-                    'blocked': totals['source_only'] - eligible,
-                }
-            except (Http404, PermissionDenied):
-                # Keep the validated upload available if its Customer linkage
-                # or Source rows changed since validation.
-                status = None
-            operational_statuses.append({'customer': customer, 'status': status})
         return TemplateResponse(request, 'admin/imports/productmaster/preview.html', {
             **self.admin_site.each_context(request), 'opts': self.model._meta,
             'title': 'Product Master', 'master': master,
             'summary': master.validation_summary or {},
             'linked_customers': linked,
-            'operational_statuses': operational_statuses,
         })
 
     def compare_view(self, request, master_id, client_id):

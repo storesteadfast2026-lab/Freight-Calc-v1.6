@@ -1,0 +1,51 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260930103702
+Username: STEADFAST\fabian
+RunAs User: STEADFAST\fabian
+Configuration Name: 
+Machine: DELL-7020-07 (Microsoft Windows NT 10.0.26200.0)
+Host Application: powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\fabian\Downloads\Calc_Continuity_Manual_0929.1629\Calc_Continuity_Manual_0929.1629\Apply_Update.ps1
+Process ID: 32876
+PSVersion: 5.1.26100.9549
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9549
+BuildVersion: 10.0.26100.9549
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+
+
+[+] copy 1/1
+ ✔ freight-calc-v16-db-1 Copied freight-calc-v16-db-1:/tmp/calc_product_master_cbbabefec077412787ba25f23a8aa4e7.dump to C:\D... 0.1s
+
+[+] stop 1/1
+ ✔ Container freight-calc-v16-web-1 Stopped                                                                                     3.4s
+Container freight-calc-v16-web-run-403a3217c9af Creating
+Container freight-calc-v16-web-run-403a3217c9af Created
+Found 250 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+....................................................................................................................................
+.................................................................................Repair review cleanup complete: 1 file(s), 1 stagin
+g object(s) removed.
+.....................................
+----------------------------------------------------------------------
+Ran 250 tests in 12.281s
+
+OK
+Destroying test database for alias 'default'...
+[+] up 2/2
+ ✔ Container freight-calc-v16-db-1  Running                                                                                     0.0s
+ ✔ Container freight-calc-v16-web-1 Started                                                                                     0.2s
+System check identified no issues (0 silenced).
+No changes detected
+Calculator App manual Continuity Snapshot launcher installed; operational data unchanged.
+Backup: C:\Docker-Projects\Freight-Calc-v1.6\update_backups\Calc_Continuity_Manual_0929.1629
+**********************
+Windows PowerShell transcript end
+End time: 20260930103738
+**********************

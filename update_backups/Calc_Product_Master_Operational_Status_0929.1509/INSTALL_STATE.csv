@@ -1,0 +1,4 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/imports/admin_product_master.py","True","5003217c97d7f0253c81f11ce48c5fe2ff6c02dc1f92173be00f5495f71f52ee","fecb45f33c86d183b5c782c6b8925c43d02d8fd550a5c3f844b95bb3110a2ff4"
+"app/templates/admin/imports/productmaster/preview.html","True","f9986ad0790a2ec3b7dd77765341dc1fbaeb5f55e54e3773642f59658cc6b749","5a7a6df5eac8975ad29aefd86a6384033012c55f0e4c8d00f9d1a0de6e70d216"
+"app/apps/imports/tests/test_product_master_operational_status.py","False","","e8494de6d8617bbdda59cfa40b26f773e0628c94aba2b0163065f7c4038bcae6"

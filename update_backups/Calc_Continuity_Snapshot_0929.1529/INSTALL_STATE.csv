@@ -1,0 +1,7 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/imports/management/commands/export_continuity_state.py","False","","16a6ae7a121ff60df0bb1829bc1a69273dfcff78c2abbffc572d8a968566f934"
+"app/apps/imports/tests/test_continuity_state.py","False","","05baffa8f99e57bdf8e5ec6e2a25c16dd8f310d562cc46ffd41093e18cf44681"
+"tools/Create_Continuity_Snapshot.ps1","False","","ab554698405aa3929e052c6ceaa88a318167944a2efa7bf53df59ccb084703c5"
+"tools/Create_Continuity_Snapshot.bat","False","","55bc4af7fbaef1080c608cc03c0c490f3b528d503c85024f243d5c2e2351c7f7"
+"tools/CONTINUITY_RULES.md","False","","186c2f29cd06253f28cd2a381a87ac03d086f1bd5724bbb77d414bcaee4e64cb"
+"tools/README_CONTINUE.md","False","","2459cec26303071ee4687c873041f208ce35af2dfd21a498df8412eac4ab3773"

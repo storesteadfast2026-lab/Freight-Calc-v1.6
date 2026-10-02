@@ -63,9 +63,7 @@ def import_new_products_from_master(master, customer, selected_rows, *, actor=No
     """Bridge an approved selection into the existing draft, Apply and audit workflow."""
     master = ProductMaster.objects.select_for_update().get(pk=master.pk, status='VALIDATED')
     expected_client_id = customer.linked_client_id
-    # linked_client is nullable: joining it here makes PostgreSQL FOR UPDATE
-    # lock the nullable side of an outer join and rejects the entire Apply.
-    customer = Customer.objects.select_for_update().get(pk=customer.pk)
+    customer = Customer.objects.select_for_update().select_related('linked_client').get(pk=customer.pk)
     if not expected_client_id or customer.linked_client_id != expected_client_id:
         raise SourceImportError('Customer linkage changed. Review the selection again.')
     refreshed, invalid = reconciliation_rows_for_customer(master, customer, include_invalid=True)

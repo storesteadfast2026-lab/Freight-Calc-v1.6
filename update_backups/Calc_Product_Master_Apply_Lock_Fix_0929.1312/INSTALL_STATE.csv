@@ -1,0 +1,3 @@
+﻿"RelativePath","Existed","OldSHA256","NewSHA256"
+"app/apps/imports/services/product_master.py","True","2317b96725c8e6a35f1ec07182459b0d4dfc0ef23ab643be033059ba05ba723d","ffe97c67dbb1eaeef2de922b03809eaeaf82259f0caff33149f026a52234f8f4"
+"app/apps/imports/tests/test_product_master_reconciliation_bridge.py","True","5481d8c3bbd2d5aab5ccb3cdbc207e8c3073032d566d26648495d3f18b208a67","8276c006d8991215ff266103a49aed67509642e55d6fbf3ef8ecfc05d9e84af8"

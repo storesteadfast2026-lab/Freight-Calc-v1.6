@@ -21,21 +21,6 @@
 <h2>Validation overview</h2>
 <p>Rows read: {{ summary.rows_read }} · Reader rejected: {{ summary.rows_rejected_by_reader }} · Duplicate CUSTOMER/SKU pairs: {{ summary.duplicate_customer_sku_pairs }}</p>
 <ul>{% for status, count in summary.status_counts.items %}<li>{{ status }}: {{ count }}</li>{% endfor %}</ul>
-{% for item in operational_statuses %}
-<h2>Operational status for {{ item.customer.linked_client.code }}</h2>
-{% if item.status %}
-<table><tbody>
-  <tr><th>Product Master rows</th><td>{{ item.status.source_rows }}</td></tr>
-  <tr><th>Operational Products</th><td>{{ item.status.operational_products }}</td></tr>
-  <tr><th>Matched / Same</th><td>{{ item.status.same }}</td></tr>
-  <tr><th>Different</th><td>{{ item.status.different }}</td></tr>
-  <tr><th>Source only</th><td>{{ item.status.source_only }}</td></tr>
-  <tr><th>Operational only</th><td>{{ item.status.operational_only }}</td></tr>
-  <tr><th>Eligible remaining</th><td>{{ item.status.eligible_remaining }}</td></tr>
-  <tr><th>Blocked</th><td>{{ item.status.blocked }}</td></tr>
-</tbody></table>
-{% else %}<p>Current operational comparison is unavailable for this Calculator Customer.</p>{% endif %}
-{% endfor %}
 <h2>Rows by CUSTOMER</h2>
 <ul>{% for code, count in summary.customer_counts.items %}<li>{{ code }}: {{ count }}</li>{% endfor %}</ul>
 <h2>Preview (first {{ summary.preview_limit }} rows)</h2>

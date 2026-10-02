@@ -7,15 +7,6 @@
   .recon-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:10px; margin:16px 0; }
   .recon-card { border:1px solid var(--hairline-color); padding:10px 12px; background:var(--body-bg); }
   .recon-card strong { display:block; font-size:20px; }
-  .recon-card small { display:block; margin-top:5px; }
-  .signal-green { border-left:5px solid #298344; }
-  .signal-red { border-left:5px solid #b42331; }
-  .signal-yellow { border-left:5px solid #c58a00; }
-  .signal-orange { border-left:5px solid #d46b08; }
-  .signal-manual { border-left:5px solid #6d727a; }
-  .import-confirm { position:sticky; top:0; z-index:2; background:var(--body-bg); border:2px solid #417690; padding:14px; margin:16px 0; }
-  .import-confirm label { display:block; margin:9px 0; }
-  .import-confirm .button { font-weight:bold; }
   .recon-warning { padding:12px; margin:12px 0; border-left:4px solid #ba2121; background:#fff3f3; color:#7a1515; }
   .recon-safe { padding:12px; margin:12px 0; border-left:4px solid #417690; background:var(--darkened-bg); }
   .recon-controls { display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin:14px 0; }
@@ -39,7 +30,6 @@
   .review-needs_review, .review-partial { background:#fde2e2; color:#812020; }
   .review-draft { background:#fff0c2; color:#634b00; }
   .review-applied { background:#d9efd9; color:#175d2b; }
-  .review-new { background:#fff0d8; color:#804010; }
 </style>
 {% endblock %}
 
@@ -60,38 +50,14 @@
 <div class="recon-summary">
   <div class="recon-card">Source rows<strong>{{ summary.source_rows }}</strong></div>
   <div class="recon-card">Operational Products<strong>{{ summary.operational_products }}</strong></div>
-  <div class="recon-card signal-green">🟢 Matched / No action required<strong>{{ summary.same }}</strong></div>
-  <div class="recon-card">Different<strong>{{ summary.different }}</strong><small>{{ review_counts.needs_review }} needs review · {{ review_counts.partial }} partially reviewed · {{ review_counts.draft }} draft · {{ review_counts.applied }} applied</small></div>
-  <div class="recon-card signal-red">🔴 Needs review<strong>{{ review_counts.needs_review }}</strong><small>{{ review_counts.partial }} partially reviewed</small></div>
-  <div class="recon-card signal-yellow">🟡 Draft / In review<strong>{{ review_counts.draft }}</strong></div>
-  <div class="recon-card signal-green">🟢 Applied / Resolved<strong>{{ review_counts.applied }}</strong></div>
-  <div class="recon-card signal-orange">🟠 Source only / New Product<strong>{{ summary.source_only }}</strong></div>
-  <div class="recon-card signal-manual">⚠ Operational only / Manual review<strong>{{ summary.operational_only }}</strong></div>
+  <div class="recon-card">Matched / No action required<strong>{{ summary.same }}</strong></div>
+  <div class="recon-card">Different · open reconciliation<strong>{{ summary.different }}</strong></div>
+  <div class="recon-card">Source only · new Products<strong>{{ summary.source_only }}</strong></div>
+  <div class="recon-card">Operational only · manual review<strong>{{ summary.operational_only }}</strong></div>
   <div class="recon-card">Physical differences (may remain after review)<strong>{{ summary.physical_differences }}</strong></div>
   <div class="recon-card">Duplicate source<strong>{{ summary.duplicate_source }}</strong></div>
 </div>
-<p class="recon-safe"><strong>Import progress:</strong> {{ progress.initial }} eligible initially · {{ progress.imported }} imported · {{ progress.remaining }} remaining. Counts reflect current Products and active import batches for this Product Master.</p>
 
-{% if preview_token %}
-<section aria-label="{% if preview_is_global %}Preview all eligible remaining Products{% else %}Preview current Product import stage{% endif %}">
-  <h2>Preview import · {{ preview_rows|length }} proposed Products</h2>
-  {% if preview_invalid %}<div class="recon-warning">{{ preview_invalid }} selected SKU(s) became ineligible. Return to Review; Import is disabled.</div>{% endif %}
-  <div class="import-confirm">
-    <strong>{{ preview_rows|length }} Products will be created · 0 existing Products will be updated · 0 Products will be deleted</strong>
-    {% if preview_is_global %}<p>{{ excluded_source_only }} Source-only excluded from import.</p>{% endif %}
-    {% if preview_rows and not preview_invalid %}
-      <form method="post">{% csrf_token %}
-        <input type="hidden" name="action" value="import"><input type="hidden" name="token" value="{{ preview_token }}">
-        <label><input type="checkbox" name="confirmed" value="1" required> I reviewed these {{ preview_rows|length }} proposed Products</label>
-        <button type="submit" class="button default">{% if preview_is_global %}Import all {{ preview_rows|length }} eligible Products{% else %}Import {{ preview_rows|length }} new Products{% endif %}</button>
-      </form>
-    {% endif %}
-  </div>
-  <table class="recon-table"><thead><tr><th>SKU / Source row</th><th>Name / Description</th><th>Source dimensions (mm) → final (m)</th><th>Weight kg / Cubic m³</th><th>Pallet → C/P</th><th>Source status / warnings</th></tr></thead><tbody>
-  {% for row in preview_rows %}<tr><td>{{ row.sku }} · {{ row.source_row_number }}</td><td>{{ row.source_values.name }}<br>{{ row.source_values.description }}</td><td>{{ row.source.length_mm }} × {{ row.source.width_mm }} × {{ row.source.height_mm }} → {{ row.source_values.length_m }} × {{ row.source_values.width_m }} × {{ row.source_values.height_m }}</td><td>{{ row.source_values.weight_kg }} kg · {{ row.source_values.cubic_m3 }} m³</td><td>{{ row.source_values.pallet }} → {{ row.source_values.freight_type }}</td><td>{{ row.source_values.source_status }}{% for warning in row.import_warnings %}<br>{{ warning }}{% empty %}<br>Valid{% endfor %}</td></tr>{% endfor %}</tbody></table>
-  <p><a href="?status=SOURCE_ONLY">Back to Review new Products</a></p>
-</section>
-{% else %}
 <form method="get" class="recon-controls">
   <label>Search SKU or name<input type="search" name="q" value="{{ search }}"></label>
   <label>Status
@@ -110,20 +76,16 @@
 </form>
 
 {% if invalid_rows %}<div class="recon-warning">{{ invalid_rows|length }} invalid Source row(s) were excluded from comparison and import. Review the uploaded workbook.{% for item in invalid_rows|slice:':20' %}<p>Row {{ item.source_row_number }}: {{ item.validation_errors|join:', ' }}</p>{% endfor %}</div>{% endif %}
-{% if eligible_count and can_import %}
-<form method="post" class="recon-safe">{% csrf_token %}
-  <input type="hidden" name="action" value="review_all">
-  <button type="submit" class="button">Preview all eligible remaining ({{ eligible_count }})</button>
-  <span>Across every page for this Calculator Customer.</span>
-</form>
-{% endif %}
-{% if selected_status == 'SOURCE_ONLY' and eligible_count %}
-<h2>Review new Products</h2>
-<p>{{ stage_eligible_count }} eligible Products on this page (up to 50 per stage) · {{ eligible_count }} eligible remaining overall. Select fewer if needed.</p>
-<form method="post" id="master-selection">{% csrf_token %}
-  <input type="hidden" name="action" value="review"><input type="hidden" name="page" value="{{ page_obj.number }}"><input type="hidden" name="q" value="{{ search }}">
-  <button class="button" name="select_all" value="1" type="submit">Select all eligible in current stage · Preview</button>
-  <button class="button" type="submit">Preview selected</button>
+{% if preview_token %}
+<h2>Preview import · {{ preview_rows|length }} eligible Products</h2>
+{% if preview_invalid %}<div class="recon-warning">{{ preview_invalid }} selected SKU(s) became ineligible. Return to Review; Import is disabled.</div>{% endif %}
+<table class="recon-table"><thead><tr><th>SKU / Source row</th><th>Name / Description</th><th>Source dimensions (mm) → final (m)</th><th>Weight kg / Cubic m³</th><th>Pallet → C/P</th><th>Source status / warnings</th></tr></thead><tbody>
+{% for row in preview_rows %}<tr><td>{{ row.sku }} · {{ row.source_row_number }}</td><td>{{ row.source_values.name }}<br>{{ row.source_values.description }}</td><td>{{ row.source.length_mm }} × {{ row.source.width_mm }} × {{ row.source.height_mm }} → {{ row.source_values.length_m }} × {{ row.source_values.width_m }} × {{ row.source_values.height_m }}</td><td>{{ row.source_values.weight_kg }} kg · {{ row.source_values.cubic_m3 }} m³</td><td>{{ row.source_values.pallet }} → {{ row.source_values.freight_type }}</td><td>{{ row.source_values.source_status }}{% for warning in row.import_warnings %}<br>{{ warning }}{% empty %}<br>Valid{% endfor %}</td></tr>{% endfor %}</tbody></table>
+{% if preview_rows and not preview_invalid %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="import"><input type="hidden" name="token" value="{{ preview_token }}"><button type="submit" class="button default">Import {{ preview_rows|length }} new Products / Apply</button></form>{% endif %}
+<p><a href="?status=SOURCE_ONLY">Back to Review new Products</a></p>
+{% elif selected_status == 'SOURCE_ONLY' and eligible_count %}
+<h2>Review new Products</h2><p>{{ eligible_count }} eligible Source-only SKUs. Review the Preview before importing.</p>
+<form method="post" id="master-selection">{% csrf_token %}<input type="hidden" name="action" value="review"><button class="button" name="select_all" value="1" type="submit">Select all eligible · Preview import</button><button class="button" type="submit">Preview selected</button>
 {% endif %}
 {% if not blocked %}
 <table class="recon-table">
@@ -132,11 +94,11 @@
   {% for row in page_obj %}
     <tr class="recon-{{ row.status|lower }}">
       <td>{% if selected_status == "SOURCE_ONLY" and row.status == "SOURCE_ONLY" and not preview_token %}<input type="checkbox" name="skus" value="{{ row.sku }}" form="master-selection" {% if row.import_warnings %}disabled{% endif %}>{% endif %}<strong>{{ row.sku }}</strong><br>{% if row.source_row_number %}Row {{ row.source_row_number }}{% else %}No source row{% endif %}<br><small>C/P: {{ row.operational_values.freight_type|default:"Not provided" }}</small></td>
-      <td>{% if row.status == "SAME" %}<span class="review-state review-applied">🟢 Matched / No action required</span>{% elif row.status == "OPERATIONAL_ONLY" %}<span class="review-state">⚠ Operational only / Manual review</span>{% elif row.status == "SOURCE_ONLY" %}<span class="review-state review-new">🟠 New Product candidate</span>{% else %}{{ row.status }}{% endif %}{% if row.status == "DIFFERENT" %}<br><span class="review-state review-{{ row.review_state }}">{% if row.review_state == "partial" %}Partially reviewed{% elif row.review_state == "draft" %}Draft / In review{% elif row.review_state == "applied" %}Applied / Resolved{% else %}Needs review{% endif %}</span>{% if row.latest_correction_round %}<br>Correction Round #{{ row.latest_correction_round.pk }}{% endif %}{% if row.latest_decision %}<br>Last decision: {{ row.latest_decision.reviewed_at }}{% endif %}{% endif %}{% if row.changed_fields %}<br><small>{{ row.changed_fields|join:", " }}</small>{% endif %}</td>
+      <td>{% if row.status == "SAME" %}Matched / No action required{% elif row.status == "OPERATIONAL_ONLY" %}Operational only · manual review{% else %}{{ row.status }}{% endif %}{% if row.status == "DIFFERENT" %}<br><span class="review-state review-{{ row.review_state }}">{% if row.review_state == "partial" %}Partially reviewed{% elif row.review_state == "draft" %}Draft / In review{% elif row.review_state == "applied" %}Applied / Resolved{% else %}Needs review{% endif %}</span>{% if row.latest_correction_round %}<br>Correction Round #{{ row.latest_correction_round.pk }}{% endif %}{% if row.latest_decision %}<br>Last decision: {{ row.latest_decision.reviewed_at }}{% endif %}{% endif %}{% if row.changed_fields %}<br><small>{{ row.changed_fields|join:", " }}</small>{% endif %}</td>
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.name|default:"—" }}{% if row.source_values.description %}<br><small>{{ row.source_values.description }}</small>{% endif %}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.name|default:"—" }}{% if row.operational_values.description %}<br><small>{{ row.operational_values.description }}</small>{% endif %}</div></td>
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.length_m|stringformat:"s"|default:"—" }} × {{ row.source_values.width_m|stringformat:"s"|default:"—" }} × {{ row.source_values.height_m|stringformat:"s"|default:"—" }}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.length_m|stringformat:"s"|default:"—" }} × {{ row.operational_values.width_m|stringformat:"s"|default:"—" }} × {{ row.operational_values.height_m|stringformat:"s"|default:"—" }}</div></td>
       <td><div class="recon-label">Source</div><div class="recon-source">{{ row.source_values.weight_kg|stringformat:"s"|default:"—" }} kg · {{ row.source_values.cubic_m3|stringformat:"s"|default:"—" }} m³<br>Qty {{ row.source_values.quantity|stringformat:"s"|default:"—" }}</div><div class="recon-operational"><span class="recon-label">Calculator</span><br>{{ row.operational_values.weight_kg|stringformat:"s"|default:"—" }} kg · {{ row.operational_values.cubic_m3|stringformat:"s"|default:"—" }} m³</div></td>
-      <td>{% if row.memory_state == 'EXACT' %}<span class="recon-badge">PREVIOUSLY RESOLVED · IDENTICAL SOURCE</span>{% elif row.memory_state == 'SOURCE_CHANGED' %}<span class="recon-badge">PREVIOUS SOLUTION · SOURCE CHANGED</span>{% endif %}{% for rule in row.matching_rules %}<span class="recon-badge">RULE: {{ rule.name }}</span>{% endfor %}{% for warning in row.warnings %}<span class="recon-badge">{{ warning }}</span>{% empty %}{% if not row.memory %}—{% endif %}{% endfor %}{% if row.reconciliation_url %}<br><a href="{{ row.reconciliation_url }}">Open reconciliation</a>{% endif %}{% if row.status == "SOURCE_ONLY" and row.import_warnings %}<br>Excluded from import: {{ row.import_warnings|join:", " }}{% endif %}{% if row.source_values.comment %}<br><details><summary>Source comment</summary>{{ row.source_values.comment }}</details>{% endif %}</td>
+      <td>{% if row.memory_state == 'EXACT' %}<span class="recon-badge">PREVIOUSLY RESOLVED · IDENTICAL SOURCE</span>{% elif row.memory_state == 'SOURCE_CHANGED' %}<span class="recon-badge">PREVIOUS SOLUTION · SOURCE CHANGED</span>{% endif %}{% for rule in row.matching_rules %}<span class="recon-badge">RULE: {{ rule.name }}</span>{% endfor %}{% for warning in row.warnings %}<span class="recon-badge">{{ warning }}</span>{% empty %}{% if not row.memory %}—{% endif %}{% endfor %}{% if row.reconciliation_url %}<br><a href="{{ row.reconciliation_url }}">Open reconciliation</a>{% endif %}{% if row.status == "SOURCE_ONLY" and row.import_warnings %}<br>Excluded from import: {{ row.import_warnings|join:", " }}{% endif %}{% if row.reconciliation_url %}<br><a href="{{ row.reconciliation_url }}">Open reconciliation</a>{% endif %}{% if row.status == "SOURCE_ONLY" and row.import_warnings %}<br>Excluded from import: {{ row.import_warnings|join:", " }}{% endif %}{% if row.source_values.comment %}<br><details><summary>Source comment</summary>{{ row.source_values.comment }}</details>{% endif %}</td>
     </tr>
   {% empty %}<tr><td colspan="6">No records match this filter.</td></tr>{% endfor %}
   </tbody>
@@ -150,6 +112,5 @@
  Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
 {% if page_obj.has_next %}<a href="?q={{ search|urlencode }}&status={{ selected_status|urlencode }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
 </p>
-{% endif %}
 {% endif %}
 {% endblock %}

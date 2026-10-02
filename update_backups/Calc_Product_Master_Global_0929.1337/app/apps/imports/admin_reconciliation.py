@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from hashlib import sha256
-import json
 from decimal import Decimal
 from urllib.parse import urlencode
 
@@ -348,12 +346,7 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
     page_title = 'Product Master reconciliation comparison'
     page_description = 'Review this Calculator Customer’s Product Master rows.'
 
-    @staticmethod
-    def _global_selection_hash(eligible):
-        """Bind a compact Preview token to every currently eligible SKU."""
-        return sha256(json.dumps(sorted(eligible), ensure_ascii=False).encode('utf-8')).hexdigest()
-
-    def _selection(self, token, master, client, eligible):
+    def _selection(self, token, master, client):
         try:
             payload = signing.loads(token, salt='product-master-import', max_age=3600)
         except signing.BadSignature as exc:
@@ -361,20 +354,11 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         if (payload.get('master') != master.pk or payload.get('client') != client.pk
                 or payload.get('sha') != master.sha256):
             raise PermissionDenied('Import selection does not belong to this Customer.')
-        if payload.get('mode') == 'ALL':
-            if (not isinstance(payload.get('count'), int) or payload['count'] < 1
-                    or not isinstance(payload.get('selection_hash'), str)):
-                raise PermissionDenied('Invalid global import selection.')
-            valid = (payload['count'] == len(eligible)
-                     and payload['selection_hash'] == self._global_selection_hash(eligible))
-            return list(eligible), True, valid
-        if payload.get('mode') not in (None, 'STAGE'):
-            raise PermissionDenied('Invalid import selection mode.')
         selected = payload.get('skus')
         if (not isinstance(selected, list) or not selected
                 or len(selected) > self.page_size or len(selected) != len(set(selected))):
             raise PermissionDenied('Invalid import selection.')
-        return selected, False, True
+        return selected
 
     def _current_stage(self, rows, eligible, *, query='', page=None):
         """Use the visible Source-only page as the batch boundary."""
@@ -436,24 +420,13 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         review_counts = {state: sum(row.get('review_state') == state for row in rows)
                          for state in ('needs_review', 'partial', 'draft', 'applied')}
         progress = self._import_progress(master, source.client, eligible)
-        excluded_source_only = summary['source_only'] - len(eligible)
         action = request.POST.get('action') if request.method == 'POST' else None
-        if request.method == 'POST' and action not in {'review', 'review_all', 'import'}:
+        if request.method == 'POST' and action not in {'review', 'import'}:
             return HttpResponseNotAllowed(['GET', 'POST'])
-        if action in {'review', 'review_all', 'import'} and not (
+        if action in {'review', 'import'} and not (
             request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation')
         ):
             raise PermissionDenied
-        if action == 'review_all':
-            if not eligible:
-                messages.error(request, 'No eligible Source-only Products remain.')
-                return redirect(request.path + '?status=SOURCE_ONLY')
-            token = signing.dumps({
-                'master': master.pk, 'client': source.client_id, 'sha': master.sha256,
-                'mode': 'ALL', 'count': len(eligible),
-                'selection_hash': self._global_selection_hash(eligible),
-            }, salt='product-master-import', compress=True)
-            return redirect(request.path + '?' + urlencode({'preview': token}))
         if action == 'review':
             requested = request.POST.getlist('skus')
             stage = self._current_stage(
@@ -468,14 +441,13 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
                                   salt='product-master-import', compress=True)
             return redirect(request.path + '?' + urlencode({'preview': token}))
         if action == 'import':
-            selected, _global_mode, selection_valid = self._selection(
-                request.POST.get('token', ''), master, source.client, eligible)
+            selected = self._selection(request.POST.get('token', ''), master, source.client)
             if request.POST.get('confirmed') != '1':
                 messages.error(request, 'Confirm that you reviewed the proposed Products before Apply.')
                 return redirect(request.path + '?' + urlencode({
                     'preview': request.POST.get('token', ''),
                 }))
-            if not selection_valid or set(selected) - eligible.keys() or not selected:
+            if set(selected) - eligible.keys() or not selected:
                 messages.error(request, 'Source or operational Products changed. Review the selection again.')
                 return redirect(request.path + '?status=SOURCE_ONLY')
             try:
@@ -498,9 +470,6 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         ) if is_django_administrator(request.user) else reverse('admin:index')
         response.context_data['back_label'] = 'Product Masters'
         response.context_data['eligible_count'] = len(eligible)
-        response.context_data['excluded_source_only'] = excluded_source_only
-        response.context_data['can_import'] = (
-            request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation'))
         response.context_data['progress'] = progress
         response.context_data['review_counts'] = review_counts
         response.context_data['stage_eligible_count'] = len(self._current_stage(
@@ -508,14 +477,10 @@ class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
         response.context_data['invalid_rows'] = source.invalid_rows
         token = request.GET.get('preview')
         if token:
-            selected, global_mode, selection_valid = self._selection(
-                token, master, source.client, eligible)
-            preview = ([eligible[sku] for sku in selected if sku in eligible]
-                       if selection_valid else [])
+            selected = self._selection(token, master, source.client)
+            preview = [eligible[sku] for sku in selected if sku in eligible]
             response.context_data.update({'preview_token': token, 'preview_rows': preview,
-                                          'preview_is_global': global_mode,
-                                          'preview_invalid': (len(selected) - len(preview)
-                                              if selection_valid else max(1, len(selected) - len(preview)))})
+                                          'preview_invalid': len(selected) - len(preview)})
         return response
 
     @staticmethod

@@ -73,17 +73,16 @@
 <p class="recon-safe"><strong>Import progress:</strong> {{ progress.initial }} eligible initially · {{ progress.imported }} imported · {{ progress.remaining }} remaining. Counts reflect current Products and active import batches for this Product Master.</p>
 
 {% if preview_token %}
-<section aria-label="{% if preview_is_global %}Preview all eligible remaining Products{% else %}Preview current Product import stage{% endif %}">
+<section aria-label="Preview current Product import stage">
   <h2>Preview import · {{ preview_rows|length }} proposed Products</h2>
   {% if preview_invalid %}<div class="recon-warning">{{ preview_invalid }} selected SKU(s) became ineligible. Return to Review; Import is disabled.</div>{% endif %}
   <div class="import-confirm">
     <strong>{{ preview_rows|length }} Products will be created · 0 existing Products will be updated · 0 Products will be deleted</strong>
-    {% if preview_is_global %}<p>{{ excluded_source_only }} Source-only excluded from import.</p>{% endif %}
     {% if preview_rows and not preview_invalid %}
       <form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="import"><input type="hidden" name="token" value="{{ preview_token }}">
         <label><input type="checkbox" name="confirmed" value="1" required> I reviewed these {{ preview_rows|length }} proposed Products</label>
-        <button type="submit" class="button default">{% if preview_is_global %}Import all {{ preview_rows|length }} eligible Products{% else %}Import {{ preview_rows|length }} new Products{% endif %}</button>
+        <button type="submit" class="button default">Import {{ preview_rows|length }} new Products</button>
       </form>
     {% endif %}
   </div>
@@ -110,13 +109,6 @@
 </form>
 
 {% if invalid_rows %}<div class="recon-warning">{{ invalid_rows|length }} invalid Source row(s) were excluded from comparison and import. Review the uploaded workbook.{% for item in invalid_rows|slice:':20' %}<p>Row {{ item.source_row_number }}: {{ item.validation_errors|join:', ' }}</p>{% endfor %}</div>{% endif %}
-{% if eligible_count and can_import %}
-<form method="post" class="recon-safe">{% csrf_token %}
-  <input type="hidden" name="action" value="review_all">
-  <button type="submit" class="button">Preview all eligible remaining ({{ eligible_count }})</button>
-  <span>Across every page for this Calculator Customer.</span>
-</form>
-{% endif %}
 {% if selected_status == 'SOURCE_ONLY' and eligible_count %}
 <h2>Review new Products</h2>
 <p>{{ stage_eligible_count }} eligible Products on this page (up to 50 per stage) · {{ eligible_count }} eligible remaining overall. Select fewer if needed.</p>
