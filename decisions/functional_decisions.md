@@ -1,3 +1,5 @@
+> Current-state supplement — 2026-10-02. The original document below is retained in full. For the subjects explicitly clarified in the dated supplement at the end, use that supplement rather than the older wording. This is a documentation update; it neither changes application behaviour nor certifies the installed database or deployment.
+
 # Functional Decisions Log
 
 **Project:** STH Freight Calculator
@@ -127,3 +129,64 @@
 - **Visibility:** Customers see only estimates they created for their assigned Client. Internal Users see estimates for authorised Clients. CSV and Excel exports are Internal-User-only.
 - **Boundary:** Saved estimates are not binding quotations. Email, approval and quotation lifecycle remain excluded.
 - **Reversibility:** `SAVED_ESTIMATES_ENABLED=0` removes the feature UI and endpoints while leaving normal calculation available.
+
+
+---
+
+## Current-state decision supplement — 2026-10-02
+
+**Project name:** Calculator App. Historical STH naming above is retained for provenance.
+**Baseline:** `Calculator_App_AI_Continuity_20261002_113659_907.zip`.
+**Scope:** reconcile existing implementation with documentation; no application or data changes.
+
+### DEC-022 — Product source validation and controlled operational Apply
+
+- **Status:** Implemented in source; installed runtime not verified.
+- **Clarification of DEC-007:** Product upload/validation remains non-operational staging. Subsequent explicit Product Apply, Source-only creation and Correction Rounds are now implemented. Stock remains reference-only. Fuel retains explicit activation.
+- **Boundary:** Source is immutable; Draft and Preview do not modify Product. Reuse the existing decisions, staging, memory, Apply, audit and rollback workflows. Decisions remain per field.
+- **Evidence:** `app/apps/imports/services/product_reconciliation_apply.py`, `product_correction_rounds.py`, related migrations and tests.
+- **Open risk:** Initial UPDATE rollback lacks the post-Apply snapshot check needed to protect later changes.
+
+### DEC-023 — Commercial Customer and operational Client identity
+
+- **Status:** Implemented in source; legacy import exception remains open.
+- **Decision:** Product identity is Client + SKU. Customer links to Client through `linked_client`; special Customer `*` cannot be enabled. Use the existing atomic enabling service and preserve names of reused Clients.
+- **Boundary:** Do not create Customers or Clients automatically during Product Master import.
+- **Open exception:** `import_sth_excel` still creates a Client through `get_or_create` and supports destructive replacement. This path needs review before claiming the rule is enforced everywhere.
+
+### DEC-024 — Independent global Product Master
+
+- **Status:** Implemented in source; end-to-end installed acceptance pending.
+- **Decision:** Resolve global `products.xls` rows through Customer code and its linked Client, retaining LINKED/UNLINKED/UNKNOWN_CUSTOMER/EMPTY_CUSTOMER. Keep the single-Client ExternalDataFile flow and mandatory owner.
+- **Source-only:** Reuse existing Preview/Apply creation, staged/global eligible selection and recalculated comparison. Create only eligible missing Products; leave blocked rows pending.
+- **Security:** Enforce authorised Calculator Customer scope in backend, including direct requests and global-source rows.
+
+### DEC-025 — Stock authority and quantities remain open
+
+- **Status:** Reference staging implemented; operational global Stock workflow and quantity semantics pending.
+- **Decision boundary:** Product remains the current calculation attribute source. Stock validation does not establish operational quantity or availability authority.
+- **Required confirmation:** Full/partial snapshots, duplicate rows, serials, negative quantities, missing SKUs and zero stock. No missing-equals-zero rule is confirmed.
+- **Canonical rule:** See PROD-012 in `business_rules/products.md`. Pending notes record observations, not approved rules.
+
+### DEC-026 — Saved Estimates email extends the original exclusion
+
+- **Status:** Email/PDF implemented in source; SMTP runtime delivery not verified.
+- **Clarification of DEC-021 and ADR 0015:** The original no-email exclusion describes the earlier scope. Current code implements PDF email with recipient resolution and Client authorisation. The exclusion is superseded for email only.
+- **Unchanged boundary:** Saved Estimates are not binding quotations. Approval and quotation lifecycle remain unimplemented; do not infer them from email delivery.
+- **Evidence:** `app/apps/saved_estimates/services/emailing.py`, PDF export, views/templates and tests.
+- **Separate pending work:** Invitation/password-reset email remains subject to its own configuration and end-to-end verification.
+
+### DEC-027 — Continuity evidence and current snapshot policy
+
+- **Status:** Current shared-script policy recorded; installed script execution not verified by the application baseline.
+- **Decision:** Capture the current filesystem, including modified/new/untracked development files; produce one historical timestamped ZIP per successful execution, no `*_LATEST.zip`; retain manifest, SHA-256 inventory with byte sizes and exclusion log.
+- **Ownership:** Shared scripts reside in `C:\Docker-Projects\SCRIPTS` and are independent of CALC/PON application code. Old application-local launchers and documentation may still describe LATEST; their presence does not establish which shared scripts are installed.
+- **Version clarification:** The conversation records a later shared-script delivery `AI_Continuity_Scripts_1002.1131.zip`; earlier `1001.1549` references are historical. Delivery is not proof of local installation.
+
+### DEC-028 — Documentation authority and evidence discipline
+
+- **Status:** Documentation reconciliation recorded; runtime verification pending.
+- **Decision:** Business rules are canonical in `business_rules/*.md`, functional decisions here, and technical records in `docs/adr/*.md`. `docs/PROJECT_PENDING_NOTES.md` is a pending/risk register, not a competing rule source.
+- **Precedence:** Use these dated clarifications for explicitly superseded statements; retain original text as history. Code/migrations/tests determine implemented behaviour; they cannot confirm installed data or invent unapproved Stock rules.
+- **Known gaps:** Login form integration, initial Product UPDATE rollback, BFT end-to-end acceptance, legacy bootstrap, Excel regression and runtime service configuration remain open as identified by the audit.
+- **Next sequence:** Isolated runtime checks and suite; login/rollback fixes with focused tests; BFT acceptance; Stock rule confirmation; calculation regression and further canonical documentation reconciliation.
